@@ -247,7 +247,7 @@ function render({ summary, detailed }) {
     const agents = agentStats(summary, failed, calls, detailed); 
     
     const scores = agents.flatMap(a => a.scores);
-    const avg = scores.length ? scores.reduce((a, b) => x + b, 0) / scores.length : null; // تعديل بسيط لضمان الجمع الصحيح
+    const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null; // تعديل بسيط لضمان الجمع الصحيح
     const failedCalls = calls.filter(c => c.failed);
     const types = ['Soft Skills', 'Compliance', 'Business Critical', 'End User Critical'];
     const counts = Object.fromEntries(types.map(t => [t, failed.filter(r => category(r) === t).length]));

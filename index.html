@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quality Pulse AI</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="category-styles.css" />
+    <link rel="stylesheet" href="project-meta.css" />
+    <link rel="stylesheet" href="call-results.css" />
+    <link rel="stylesheet" href="agent-profile.css" />
+    <link rel="stylesheet" href="modern.css" />
+    <link rel="stylesheet" href="motion.css" />
+    <link rel="stylesheet" href="coaching-studio.css" />
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  </head>
+  <body>
+    <aside>
+      <div class="brand"><span class="brand-mark">Q</span><span>Quality Pulse AI</span></div>
+      <div class="project-meta"><strong>Project: Quality Pulse AI</strong><span>Created on: 10 Jul 2026, 11:32 PM</span></div>
+      <p class="workspace">QA Intelligence</p>
+      <nav>
+        <a class="active" href="#overview">Overview</a>
+        <a href="#ranking">Agent ranking</a>
+        <a href="#mistakes">Mistake analysis</a>
+        <a href="#actions">Action plan</a>
+      </nav>
+      <div class="side-note"><strong>Private by design</strong><br />Your files stay in this browser.</div>
+    </aside>
+    <main>
+      <header>
+        <div><p class="eyebrow">QUALITY OPERATIONS · COMMAND CENTER</p><h1>Make every quality decision with confidence.</h1><p class="subtle" id="period-label">Upload your reports to begin analysis.</p></div>
+        <div class="header-actions"><button class="secondary rules-button" id="rules-button">How results work</button><button class="secondary" id="demo-button">Load demo data</button></div>
+      </header>
+
+      <section class="upload-panel" aria-label="Upload reports">
+        <div class="file-field"><label for="summary-file">Summary report <span>optional</span></label><input id="summary-file" type="file" accept=".xlsx,.xls,.csv" /><small>Used for agent scores and evaluation totals.</small></div>
+        <div class="file-field"><label for="detailed-file">Detailed report <span>required</span></label><input id="detailed-file" type="file" accept=".xlsx,.xls,.csv" /><small>Used for attributes, severity, and error reasons.</small></div>
+        <button id="analyze-button">Analyze reports</button>
+        <p id="status" role="status"></p>
+      </section>
+
+      <section id="overview" class="metrics" aria-label="Key performance metrics">
+        <article><p>Average QA score</p><h2 id="avg-score">—</h2><span id="avg-note">Awaiting data</span></article>
+        <article><p>Total evaluations</p><h2 id="evaluations">—</h2><span>Monitored records</span></article>
+        <article><p>Agents covered</p><h2 id="agents">—</h2><span>Unique agents</span></article>
+        <article><p>Failed calls</p><h2 id="critical-errors">—</h2><span>Business, EUC, or 3 different Soft Skills</span></article>
+      </section>
+
+      <section class="panel wide"><div class="panel-heading"><div><p class="eyebrow">FAILED ITEMS BY TYPE</p><h3>Quality categories are kept separate</h3></div><span class="badge">Call-level rules applied</span></div><div id="category-breakdown" class="category-breakdown"><p class="empty">Upload a Detailed report to see the category breakdown.</p></div></section>
+
+      <section class="grid two-col">
+        <article class="panel" id="ranking"><div class="panel-heading"><div><p class="eyebrow">PERFORMANCE</p><h3>Agent ranking</h3></div><span class="badge">Lowest risk first</span></div><div id="ranking-list" class="ranking-list"><p class="empty">Upload reports to see agent performance.</p></div></article>
+        <article class="panel" id="mistakes"><div class="panel-heading"><div><p class="eyebrow">PARETO FOCUS</p><h3>Mistakes to fix first</h3></div><span class="badge">80/20 view</span></div><div id="pareto-list" class="pareto-list"><p class="empty">The most repeated attributes will appear here.</p></div></article>
+      </section>
+
+      <section class="grid two-col">
+        <article class="panel"><div class="panel-heading"><div><p class="eyebrow">OUTLIERS</p><h3>Priority coaching queue</h3></div></div><div id="outlier-list"><p class="empty">The system will identify agents needing attention.</p></div></article>
+        <article class="panel" id="actions"><div class="panel-heading"><div><p class="eyebrow">RECOMMENDATION</p><h3>Quality action plan</h3></div></div><div id="action-plan"><p class="empty">Recommendations are generated from your most frequent errors.</p></div></article>
+      </section>
+
+      <section class="panel wide" id="agent-profile"><div class="panel-heading"><div><p class="eyebrow">AGENT INSIGHT</p><h3>Individual coaching profile</h3></div><select id="agent-select" aria-label="Select an agent"><option value="">Select an agent</option></select></div><div id="agent-profile-content"><p class="empty">Analyze your report, then select an agent to see the full profile.</p></div></section>
+
+      <section class="panel wide" id="coaching-studio"><div class="panel-heading"><div><p class="eyebrow">COACHING STUDIO</p><h3>Ready-to-use quality coaching</h3></div><div class="studio-actions"><button id="generate-coaching-button">Generate coaching</button><button class="secondary" id="copy-coaching-button">Copy</button></div></div><p class="studio-hint">Select an Agent above, then generate a coaching draft based on their failed items and call results.</p><textarea id="coaching-draft" readonly placeholder="Your coaching draft will appear here after analysis."></textarea></section>
+
+      <section class="panel wide" id="management-brief"><div class="panel-heading"><div><p class="eyebrow">MANAGEMENT BRIEF</p><h3>Executive quality summary</h3></div><div class="studio-actions"><button id="generate-brief-button">Generate brief</button><button class="secondary" id="copy-brief-button">Copy</button></div></div><p class="studio-hint">A concise operational summary built from the uploaded reports, ready for a weekly update.</p><textarea id="management-brief-draft" readonly placeholder="Your management brief will appear here after analysis."></textarea></section>
+
+      <section class="panel wide" id="improvement-lab"><div class="panel-heading"><div><p class="eyebrow">IMPROVEMENT LAB</p><h3>Lean Six Sigma DMAIC plan</h3></div><div class="studio-actions"><button id="generate-dmaic-button">Generate DMAIC plan</button><button class="secondary" id="copy-dmaic-button">Copy</button></div></div><p class="studio-hint">Turns the leading failed attribute and root cause into a structured improvement plan.</p><textarea id="dmaic-draft" readonly placeholder="Your DMAIC improvement plan will appear here after analysis."></textarea></section>
+
+      <section class="panel wide"><div class="panel-heading"><div><p class="eyebrow">ROOT CAUSES</p><h3>Error reasons drill-down</h3></div></div><div id="reason-table" class="table-wrap"><p class="empty">Error reasons from the Detailed report will appear here.</p></div></section>
+      <section class="panel wide"><div class="panel-heading"><div><p class="eyebrow">FAILED ITEM DETAILS</p><h3>Call ID, attribute, reason, comment, and severity</h3></div></div><div id="failed-calls-table" class="table-wrap"><p class="empty">Failed items from the Detailed report will appear here.</p></div></section>
+      <section class="panel wide"><div class="panel-heading"><div><p class="eyebrow">CALL RESULT REGISTER</p><h3>One consolidated result for every Call ID</h3></div><button class="secondary export-button" id="export-calls-button">Export call results (CSV)</button></div><div id="call-results-table" class="table-wrap"><p class="empty">Each call's final result will appear here after analysis.</p></div></section>
+    </main>
+    <div class="modal-backdrop" id="info-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div class="modal"><div class="modal-top"><h3 id="modal-title">Quality Pulse</h3><button id="modal-close" class="modal-close" aria-label="Close">×</button></div><div id="modal-content"></div></div></div>
+    <script src="app.js"></script>
+    <script src="interaction.js"></script>
+  </body>
+</html>

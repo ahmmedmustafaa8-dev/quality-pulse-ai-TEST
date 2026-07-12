@@ -1,26 +1,21 @@
 const COLUMN_ALIASES={agent:['agent name','agent','full name','user name','agent name (full name)'],score:['score','score %','attribute score','qa score','total score','overall score','total compliance'],section:['section','section name','category','attribute category'],attribute:['attribute name','attribute'],severity:['severity'],reason:['error reason','reason','error reason name'],comment:['error reason comment','comment','reason comment'],monitoringId:['monitoring id','evaluation id','interaction id','call id','id']};
 const $=id=>document.getElementById(id),normalise=v=>String(v??'').trim().toLowerCase().replace(/[_-]+/g,' ').replace(/\s+/g,' '),cleanText=(v,fallback='Not specified')=>String(v??'').trim()||fallback;
 function findColumn(row,key){return Object.keys(row||{}).find(header=>COLUMN_ALIASES[key].includes(normalise(header)));}function value(row,key){const column=findColumn(row,key);return column?row[column]:'';}function parseScore(v){const n=parseFloat(String(v).replace('%',''));return Number.isFinite(n)?(n<=1?n*100:n):null;}function isZeroScore(v){const text=String(v??'').trim().replace('%', '');return text !==''&&Number.isFinite(Number(text))&&Number(text)===0;}function group(rows,key){return rows.reduce((m,row)=>{const label=cleanText(key(row));m.set(label,(m.get(label)||0)+1);return m;},new Map());}function fmtScore(n){return n===null||Number.isNaN(n)?'--':`${n.toFixed(1)}%`;}function showStatus(text,isError=false){$('status').textContent=text;$('status').style.color=isError?'#d94b5b':'#69758a';}
-function html(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}function csv(v){const text=String(v??'');return /^[=+\-@]/.test(text)?`'${text}`:text;}
+function html(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}function csv(v){const text=String(v??');return /^[=+\-@]/.test(text)?`'${text}`:text;}
 function category(row){const text=`${value(row,'section')} ${value(row,'severity')}`.toLowerCase();if(text.includes('business critical'))return'Business Critical';if(text.includes('end user critical')||text.includes('end-user critical'))return'End User Critical';if(text.includes('soft'))return'Soft Skills';if(text.includes('compliance'))return'Compliance';return'Other';}
 async function readFile(file){if(!file)return[];const workbook=XLSX.read(await file.arrayBuffer(),{type:'array'});return XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]],{defval:''});}
 
-// تحليل المكالمات بناءً على القواعد الجديدة: 3 أخطاء سوفت سكيلز = FAILED فوراً
 function analyseCalls(failed){const map=new Map();failed.forEach((row,index)=>{const id=cleanText(value(row,'monitoringId'),`Row ${index+1}`),agent=cleanText(value(row,'agent'),'Unknown agent'),key=`${agent}::${id}`;if(!map.has(key))map.set(key,{id,agent,softAttributes:new Set(),business:0,endUser:0,compliance:0});const call=map.get(key),type=category(row);if(type==='Soft Skills')call.softAttributes.add(normalise(cleanText(value(row,'attribute'))));if(type==='Business Critical')call.business++;if(type==='End User Critical')call.endUser++;if(type==='Compliance')call.compliance++;});
 return [...map.values()].map(call=>{
     const softCount = call.softAttributes.size;
     const softDeduction = softCount * 2;
     const calculatedScore = (call.business > 0 || call.endUser > 0) ? 0 : (100 - softDeduction);
-    
-    // شرط السقوط: إما كريتيكال، أو مجموع الدرجات تحت الـ 90، أو وجود 3 أخطاء سوفت سكيلز أو أكتر
     const isFailed = call.business > 0 || call.endUser > 0 || calculatedScore < 90 || softCount >= 3;
-    
     let reason = 'Not failed';
     if(call.business > 0) reason = 'Business Critical';
     else if(call.endUser > 0) reason = 'End User Critical';
     else if(softCount >= 3) reason = `FAILED (3+ Soft Skills Defects: ${softCount} found)`;
     else if(isFailed) reason = `Score (${calculatedScore}%) below 90% Target`;
-    
     return {...call,soft:softCount,failed:isFailed,failReason:reason};
 });}
 
@@ -39,7 +34,7 @@ function render({summary,detailed}){const hasScore=findColumn(detailed[0],'score
  $('avg-score').textContent=fmtScore(avg);$('evaluations').textContent=summary.length||'--';$('agents').textContent=agents.length||'--';$('critical-errors').textContent=failedCalls.length;$('avg-note').textContent=scores.length?'Across scored evaluations':'No score column found';$('period-label').textContent=`${failed.length} failed items (Score = 0); ${failedCalls.length} failed calls; ${duplicatesRemoved} duplicate comments removed. Target: 90%.`;
  $('category-breakdown').innerHTML=types.map(t=>`<div class="category-card"><strong>${t}</strong><span>${counts[t]} failed items</span>${t==='Soft Skills'?`<small>Each unique mistake deducts 2% · 3 mistakes fail call</small>`:''}</div>`).join('');
  $('ranking-list').innerHTML=agents.slice(0,8).map((a,i)=>`<div class="ranking-row"><span class="rank">${i+1}</span><div><div class="agent-name">${a.name}</div><div class="agent-meta">${a.evaluations} evaluations · ${a.mistakes} failed items · ${a.failedCalls} failed calls</div></div><span class="score">${fmtScore(a.average)}</span></div>`).join('')||'<p class="empty">No agents found.</p>';
- const max=attributes[0]?.[1]||1;$('pareto-list').innerHTML=attributes.slice(0,6).map(([n,c])=>`<div class="bar-row"><div><div class="bar-label">${n}</div><div class="bar"><span style="width:${c/max*100}%"></span></div></div><div class="bar-value">${c}</div></div>`).join('')||'<p class="empty">No failed items found.</p>';
+ const max=(attributes[0] && attributes[0][1])?attributes[0][1]:1;$('pareto-list').innerHTML=attributes.slice(0,6).map(([n,c])=>`<div class="bar-row"><div><div class="bar-label">${n}</div><div class="bar"><span style="width:${c/max*100}%"></span></div></div><div class="bar-value">${c}</div></div>`).join('')||'<p class="empty">No failed items found.</p>';
  const outliers=[...agents].sort((a,b)=>b.failedCalls-a.failedCalls||(a.average??101)-(b.average??101)||b.mistakes-a.mistakes).slice(0,5);$('outlier-list').innerHTML=outliers.map(a=>`<div class="outlier"><div class="outlier-top"><span>${a.name}</span><span class="priority">${a.failedCalls?'High':'Review'}</span></div><p>${fmtScore(a.average)} · ${a.failedCalls} failed calls · ${a.mistakes} failed items</p></div>`).join('')||'<p class="empty">No outliers calculated yet.</p>';
  const actions=types.filter(t=>counts[t]).sort((a,b)=>counts[b]-counts[a]).slice(0,3).map(t=>`<div class="action-item"><strong>${t} — ${counts[t]} failed items</strong><p>${t==='Soft Skills'?'Each unique soft-skill mistake deducts 2%. 3 or more soft-skill mistakes automatically fail the call.':t==='Compliance'?'Use a compliance refresher and monitor the next evaluations.':'Review immediately: this category fails the call.'}</p></div>`);$('action-plan').innerHTML=actions.join('')||'<p class="empty">No recommendations available.</p>';
  $('reason-table').innerHTML=reasons.length?`<table><thead><tr><th>Error reason</th><th>Occurrences</th><th>Share</th></tr></thead><tbody>${reasons.slice(0,12).map(([n,c])=>`<tr><td>${n}</td><td>${c}</td><td>${(c/(failed.length||1)*100).toFixed(1)}%</td></tr>`).join('')}</tbody></table>`:'<p class="empty">No zero-score errors found.</p>';

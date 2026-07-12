@@ -8,13 +8,28 @@ async function readFile(file){if(!file)return[];const workbook=XLSX.read(await f
 function analyseCalls(failed, allSummaryRows = []) {
     const map = new Map();
     
-    // أولاً: بناء خريطة بكل المكالمات وتقسيمها بناءً على الـ Detailed Report
+    // بناء قاموس سريع لمعرفة نوع المكالمة من الـ Summary report باستخدام الـ Call ID
+    const summaryTypeMap = new Map();
+    allSummaryRows.forEach(row => {
+        const id = cleanText(value(row, 'monitoringId'));
+        const tType = cleanText(value(row, 'transactionType'));
+        if (id && tType) {
+            summaryTypeMap.set(normalise(id), tType);
+        }
+    });
+    
+    // أولاً: معالجة البيانات من الـ Detailed Report لجمع الأخطاء
     failed.forEach((row, index) => {
         const id = cleanText(value(row, 'monitoringId'), `Row ${index + 1}`);
         const agent = cleanText(value(row, 'agent'), 'Unknown agent');
-        const tType = cleanText(value(row, 'transactionType'), 'Inbound'); // القيمة الافتراضية Inbound
-        const key = `${agent}::${id}`;
         
+        // محاولة جلب النوع من الـ Detailed أولاً، لو مش موجود بنجيبه من الـ Summary، لو مش موجود بيبقى الـ Default هو Inbound
+        let tType = cleanText(value(row, 'transactionType'), '');
+        if (!tType) {
+            tType = summaryTypeMap.get(normalise(id)) || 'Inbound';
+        }
+        
+        const key = `${agent}::${id}`;
         if (!map.has(key)) {
             map.set(key, { id, agent, type: tType, softAttributes: new Set(), business: 0, endUser: 0, compliance: 0 });
         }
@@ -26,11 +41,11 @@ function analyseCalls(failed, allSummaryRows = []) {
         if (type === 'Compliance') call.compliance++;
     });
 
-    // ثانياً: دمج معلومات المكالمات الناجحة (التي ليس لها أخطاء في الـ Detailed) من الـ Summary report لو وُجدت
+    // ثانياً: دمج المكالمات الـ Passed اللي مظهرتش في الـ Detailed لأن مفيهاش أخطاء
     allSummaryRows.forEach(row => {
         const agent = cleanText(value(row, 'agent'), 'Unknown agent');
         const id = cleanText(value(row, 'monitoringId'), '');
-        const tType = cleanText(value(row, 'transactionType'), 'Inbound');
+        let tType = cleanText(value(row, 'transactionType'), 'Inbound');
         if (id) {
             const key = `${agent}::${id}`;
             if (!map.has(key)) {
@@ -51,7 +66,6 @@ function analyseCalls(failed, allSummaryRows = []) {
         else if (softCount >= 3) reason = `FAILED (3+ Soft Skills Defects: ${softCount} found)`;
         else if (isFailed) reason = `Score (${calculatedScore}%) below 90% Target`;
         
-        // حساب نسب الامتثال لكل فئة على مستوى المكالمة الواحدة لزوم جداول الأداء الجديدة
         const scoresPerCategory = {
             compliance: call.compliance > 0 ? 0 : 100,
             endUser: call.endUser > 0 ? 0 : 100,
@@ -82,14 +96,16 @@ function buildCoachingDraft(name) {
 function buildManagementBrief(){const report=window.latestReportData;if(!report)return'';const topAttribute=report.attributes[0],topReason=report.reasons[0];const priorities=[...report.agents].sort((a,b)=>b.failedCalls-a.failedCalls||b.mistakes-a.mistakes).filter(a=>a.failedCalls||a.mistakes).slice(0,3);const categoryLine=Object.entries(report.counts).filter(([,count])=>count).map(([type,count])=>`${type}: ${count}`).join(' | ')||'No failed items found';return `Quality Pulse AI – Management Brief (Target: 90%)\n\nOverall performance\n• Average QA score: ${fmtScore(report.average)}\n• Total evaluations: ${report.evaluations}\n• Agents covered: ${report.agents.length}\n• Failed calls (Below 90%, Critical, or 3+ Soft Skills): ${report.failedCalls.length}\n• Failed items (Score = 0): ${report.failed.length}\n\nQuality breakdown\n${categoryLine}\n\nMain root cause\n• Top attribute: ${topAttribute?`${topAttribute[0]} (${topAttribute[1]} occurrences)`:'No data'}\n• Top error reason: ${topReason?`${topReason[0]} (${topReason[1]} occurrences)`:'No data'}\n\nPriority agents\n${priorities.length?priorities.map((agent,index)=>`${index+1}. ${agent.name}: ${agent.failedCalls} failed call(s), ${agent.mistakes} failed item(s), score ${fmtScore(agent.average)}`).join('\n'):'No immediate coaching priorities identified.'}\n\nRecommended next action\nFocus the next refresher or calibration on ${topAttribute?.[0]||'the leading quality issue'}, then monitor the next 5 evaluations for priority agents.`;}
 function buildDMAICPlan(){const report=window.latestReportData;if(!report)return'';const attribute=report.attributes[0],reason=report.reasons[0],focusType=Object.entries(report.counts).sort((a,b)=>b[1]-a[1])[0]?.[0]||'Quality';const attributeName=attribute?.[0]||'the leading quality attribute';const occurrences=attribute?.[1]||0;const improvement=focusType==='Business Critical'?'Deliver an immediate policy/process refresher, calibrate edge cases, and use targeted one-to-one coaching.':focusType==='End User Critical'?'Run a customer-impact and call-ownership refresher, then calibrate expected behaviors with sample interactions.':focusType==='Soft Skills'?'Run a soft-skills refresher using real call examples and reinforce the 2% deduction rule (3 mistakes fail the call automatically).':'Run a focused compliance refresher and validate the required steps with a checklist.';return `Quality Pulse AI – DMAIC Improvement Plan\n\nProject title\nReduce ${attributeName} failures\n\nDEFINE\nProblem: ${attributeName} is the most repeated failed attribute, with ${occurrences} zero-score occurrence(s). This contributes to ${report.failedCalls.length} failed call(s).\nGoal: Reduce ${attributeName} failed items in the next monitoring cycle while keeping scores above the 90% target.\n\nMEASURE\nBaseline: ${report.failed.length} total zero-score items across ${report.evaluations} evaluation(s).\nPrimary metric: number of zero-score ${attributeName} items.\nSecondary metric: failed calls linked to ${focusType}.\n\nANALYZE\nLeading error reason: ${reason?`${reason[0]} (${reason[1]} occurrence(s))`:'Review detailed comments to confirm the leading cause'}.\nData rule: duplicate Error Reason Comments within the same Call ID are excluded; only the first occurrence is counted.\n\nIMPROVE\n${improvement}\nUse the affected Call IDs as examples during coaching and assign clear action points to priority agents.\n\nCONTROL\n1. Monitor the next 5 evaluations for each priority agent.\n2. Review the same attribute weekly in Quality Pulse.\n3. Recalibrate if the failed-item count does not reduce.\n4. Report results using the Management Brief and compare with this baseline.`;}
 
-// وظيفة جديدة كلياً لإنشاء جداول تحليلات الـ Inbound والـ Outbound كـ Pivot ديناميكي
 function renderTransactionPivotTables(calls) {
-    // تجميع البيانات لكل موظف ولكل نوع مكالمة
     const pivot = {};
     const typesSeen = new Set();
     
     calls.forEach(c => {
-        const type = c.type || 'Inbound';
+        let type = c.type || 'Inbound';
+        // توحيد المسميات عشان تظهر مظبوطة زي الشيت (مثلا لو المسمى طويل)
+        if (type.toLowerCase().includes('inbound')) type = 'Inbound';
+        if (type.toLowerCase().includes('outbound')) type = 'Outbound';
+        
         typesSeen.add(type);
         if (!pivot[type]) pivot[type] = {};
         if (!pivot[type][c.agent]) {
@@ -102,7 +118,7 @@ function renderTransactionPivotTables(calls) {
         aData.soft.push(c.categoryScores.soft);
     });
 
-    let htmlOutput = `<h3 style="margin-top:25px; color:#fff; border-bottom:2px solid #3b82f6; padding-bottom:8px;">Score Per Agent (By Transaction Type)</h3>`;
+    let htmlOutput = `<h3 style="margin-top:35px; color:#fff; border-bottom:2px solid #3b82f6; padding-bottom:8px;">Score Per Agent (By Transaction Type)</h3>`;
     
     const orderedTypes = [...typesSeen].sort();
     if(orderedTypes.length === 0) orderedTypes.push('Inbound');
@@ -133,7 +149,7 @@ function renderTransactionPivotTables(calls) {
         } else {
             agentNames.forEach(aName => {
                 const d = agentsData[aName];
-                const avg = arr => arr.reduce((a,b)=>a+b,0) / arr.length;
+                const avg = arr => arr.length ? (arr.reduce((a,b)=>a+b,0) / arr.length) : 100;
                 const ac = avg(d.compliance), aeu = avg(d.endUser), ab = avg(d.business), as = avg(d.soft);
                 
                 totalComp += ac; totalEU += aeu; totalBiz += ab; totalSoft += as; totalCount++;
@@ -148,7 +164,6 @@ function renderTransactionPivotTables(calls) {
                 </tr>`;
             });
             
-            // سطر الإجمالي الكلي Grand Total المتطابق مع الشيت الخاص بك
             const gComp = totalComp / totalCount, gEU = totalEU / totalCount, gBiz = totalBiz / totalCount, gSoft = totalSoft / totalCount;
             htmlOutput += `
                 <tr style="background:#1e293b; font-weight:bold; border-top:2px solid #475569;">
@@ -163,7 +178,6 @@ function renderTransactionPivotTables(calls) {
         htmlOutput += `</tbody></table></div>`;
     });
 
-    // حقن وتحديث الجداول تلقائياً في حاوية مخصصة، وإذا لم تكن موجودة يتم إنشاؤها ديناميكياً قبل جدول المكالمات المباشر
     let targetContainer = $('transaction-pivot-container');
     if(!targetContainer) {
         targetContainer = document.createElement('div');
@@ -185,7 +199,6 @@ function render({summary,detailed}){const hasScore=findColumn(detailed[0],'score
  $('failed-calls-table').innerHTML=failed.length?`<table><thead><tr><th>Call ID</th><th>Agent</th><th>Type</th><th>Attribute</th><th>Error reason</th><th>Comment</th><th>Severity</th></tr></thead><tbody>${failed.slice(0,75).map((r,i)=>`<tr><td>${cleanText(value(r,'monitoringId'),`Row ${i+1}`)}</td><td>${cleanText(value(r,'agent'),'Unknown agent')}</td><td>${category(r)}</td><td>${cleanText(value(r,'attribute'))}</td><td>${cleanText(value(r,'reason'))}</td><td>${cleanText(value(r,'comment'),'-')}</td><td>${cleanText(value(r,'severity'),'-')}</td></tr>`).join('')}</tbody></table>`:'<p class="empty">No zero-score items available.</p>';
  window.latestCallResults=calls;$('call-results-table').innerHTML=calls.length?`<table><thead><tr><th>Call ID</th><th>Agent</th><th>Result</th><th>Fail reason</th><th>Unique Soft Skills</th><th>Business Critical</th><th>End User Critical</th><th>Compliance</th></tr></thead><tbody>${calls.map(call=>`<tr><td>${html(call.id)}</td><td>${html(call.agent)}</td><td><span class="result ${call.failed?'failed':'passed'}">${call.failed?'FAILED':'PASSED'}</span></td><td>${html(call.failReason)}</td><td>${call.soft}</td><td>${call.business}</td><td>${call.endUser}</td><td>${call.compliance}</td></tr>`).join('')}</tbody></table>`:'<p class="empty">No zero-score items available.</p>';
  
- // تشغيل وإنشاء جداول الـ Transaction المحدثة فوراً مع التحليل
  renderTransactionPivotTables(calls);
 
  const previousSelection=$('agent-select').value;window.latestAgentProfiles=new Map(agents.map(agent=>[agent.name,{agent,errors:failed.filter(row=>cleanText(value(row,'agent'),'Unknown agent')===agent.name),failedCalls:failedCalls.filter(call=>call.agent===agent.name)}]));window.latestReportData={average:avg,evaluations:summary.length,agents,failed,failedCalls,counts,attributes,reasons};$('agent-select').innerHTML=`<option value="">Select an agent</option>${agents.map(agent=>`<option value="${html(agent.name)}">${html(agent.name)}</option>`).join('')}`;const selected=window.latestAgentProfiles.has(previousSelection)?previousSelection:agents[0]?.name||'';$('agent-select').value=selected;renderAgentProfile(selected);

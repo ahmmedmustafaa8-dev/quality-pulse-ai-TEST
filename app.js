@@ -31,7 +31,7 @@ function parseScore(v) {
     return Number.isFinite(n) ? (n <= 1 ? n * 100 : n) : null;
 }
 function fmtScore(n) {
-    return n === null || Number.isNaN(n) ? '--' : `${n.toFixed(2)}%`;
+    return n === null || Number.isNaN(n) ? '0.00%' : `${n.toFixed(2)}%`;
 }
 function html(v) {
     return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -217,14 +217,14 @@ function render({ summary, detailed }) {
     const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : (agents.reduce((acc, a) => acc + a.average, 0) / (agents.length || 1));
     
     if (window.$('avg-score')) window.$('avg-score').textContent = fmtScore(avg);
-    if (window.$('evaluations')) window.$('evaluations').textContent = summary.length || calls.length || '--';
-    if (window.$('agents')) window.$('agents').textContent = agents.length || '--';
+    if (window.$('evaluations')) window.$('evaluations').textContent = summary.length || calls.length || '0';
+    if (window.$('agents')) window.$('agents').textContent = agents.length || '0';
     if (window.$('critical-errors')) window.$('critical-errors').textContent = calls.filter(c => c.failed).length;
     
     const rEl = window.$('ranking-list');
     if (rEl) {
         rEl.innerHTML = agents.map((a, i) => `
-            <div style="padding:12px; border-bottom:1px solid #334155; display:flex; justify-content:between; align-items:center;">
+            <div style="padding:12px; border-bottom:1px solid #334155; display:flex; justify-content:space-between; align-items:center;">
                 <span style="color:#94a3b8; font-weight:bold; width:24px;">${i+1}</span>
                 <div style="flex-grow:1; margin-left:10px;">
                     <div style="font-weight:bold; color:#f8fafc;">${a.name}</div>

@@ -1,3 +1,6 @@
+// رسالة فورية للتأكد من اختراق الكاش وقراءة الملف الجديد
+alert("🚀 تم تحميل نظام المعالجة الجديد بنجاح! اضغط OK وابدأ ترفع ملفاتك.");
+
 window.$ = id => document.getElementById(id);
 
 const ALIASES = {
@@ -177,10 +180,10 @@ async function readExcel(file) {
     if (!file) return [];
     try {
         const ab = await file.arrayBuffer();
-        if (typeof XLSX === 'undefined') { alert("⚠️ مكتبة XLSX غير موجودة في الصفحة!"); return []; }
+        if (typeof XLSX === 'undefined') { alert("⚠️ مكتبة XLSX غير مقروءة بالصفحة!"); return []; }
         const wb = XLSX.read(ab, { type: 'array' });
         return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
-    } catch (e) { alert("❌ خطأ أثناء قراءة الإكسيل: " + e.message); return []; }
+    } catch (e) { alert("❌ خطأ قراءة الإكسيل: " + e.message); return []; }
 }
 
 async function triggerAnalysis() {
@@ -189,7 +192,6 @@ async function triggerAnalysis() {
         let fDet = window.$('detailed-report')?.files[0];
         let fSum = window.$('summary-report')?.files[0];
 
-        // طريقة مرنة للغاية للالتقاط التلقائي في حال لم تكن الـ IDs متطابقة
         if (!fDet && inputs.length >= 2) {
             fSum = inputs[0].files[0];
             fDet = inputs[1].files[0];
@@ -198,4 +200,37 @@ async function triggerAnalysis() {
         }
 
         if (!fDet) { 
-            alert("⚠️ لم يتم العثور على ملف Detailed report
+            alert("⚠️ يرجى اختيار ملف Detailed report أولاً لتفعيل الحسابات."); 
+            return; 
+        }
+
+        alert("🔄 جاري سحب البيانات ومعالجتها الآن...");
+        const dData = await readExcel(fDet);
+        const sData = await readExcel(fSum);
+
+        alert(`📊 تمت القراءة بنجاح!\nDetailed: ${dData.length} سطر\nSummary: ${sData.length} سطر`);
+        render(processData(dData, sData), sData);
+        alert("✅ تم التحديث بنجاح!");
+    } catch (err) {
+        alert("🛑 عطل مفاجئ: " + err.message);
+    }
+}
+
+// 🔥 نظام المراقبة الشامل (حصانة كاملة ضد التداخل)
+document.addEventListener('click', function(e) {
+    // إذا تم الضغط على أي زر في الصفحة يحتوي على كلمة لـ "Analyze" أو زر رئيسي
+    if (e.target && (e.target.id === 'analyze-btn' || e.target.textContent.includes('Analyze') || e.target.tagName === 'BUTTON')) {
+        e.preventDefault();
+        triggerAnalysis();
+    }
+});
+
+document.addEventListener('change', function(e) {
+    if (e.target && e.target.type === 'file') {
+        const inputs = document.querySelectorAll('input[type="file"]');
+        if (inputs[0]?.files[0] || inputs[1]?.files[0]) {
+            // تشغيل تلقائي بمجرد الاختيار لتخطي عيوب الأزرار
+            setTimeout(triggerAnalysis, 300);
+        }
+    }
+});

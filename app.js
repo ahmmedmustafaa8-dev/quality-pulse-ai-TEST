@@ -1,186 +1,215 @@
-// تعريف الأداة في أول السطر لضمان عدم حدوث خطأ في الملفات الأخرى
-window.$ = function(id) { return document.getElementById(id); };
+const COLUMN_ALIASES={agent:['agent name','agent','full name','user name','agent name (full name)'],score:['score','score %','attribute score','qa score','total score','overall score','total compliance'],section:['section','section name','category','attribute category'],attribute:['attribute name','attribute'],severity:['severity'],reason:['error reason','reason','error reason name'],comment:['error reason comment','comment','reason comment'],monitoringId:['monitoring id','evaluation id','interaction id','call id','id'],transactionType:['transaction type','type','direction','call type']};
+const $=id=>document.getElementById(id),normalise=v=>String(v??'').trim().toLowerCase().replace(/[_-]+/g,' ').replace(/\s+/g,' '),cleanText=(v,fallback='Not specified')=>String(v??'').trim()||fallback;
+function findColumn(row,key){return Object.keys(row||{}).find(header=>COLUMN_ALIASES[key].includes(normalise(header)));}function value(row,key){const column=findColumn(row,key);return column?row[column]:'';}function parseScore(v){const n=parseFloat(String(v).replace('%',''));return Number.isFinite(n)?(n<=1?n*100:n):null;}function isZeroScore(v){const text=String(v??'').trim().replace('%', '');return text !==''&&Number.isFinite(Number(text))&&Number(text)===0;}function group(rows,key){return rows.reduce((m,row)=>{const label=cleanText(key(row));m.set(label,(m.get(label)||0)+1);return m;},new Map());}function fmtScore(n){return n===null||Number.isNaN(n)?'--':`${n.toFixed(1)}%`;}function showStatus(text,isError=false){$('status').textContent=text;$('status').style.color=isError?'#d94b5b':'#69758a';}
+function html(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}function csv(v){const text=String(v??'');return /^[=+\-@]/.test(text)?`'${text}`:text;}
+function category(row){const text=`${value(row,'section')} ${value(row,'severity')}`.toLowerCase();if(text.includes('business critical'))return'Business Critical';if(text.includes('end user critical')||text.includes('end-user critical'))return'End User Critical';if(text.includes('soft'))return'Soft Skills';if(text.includes('compliance'))return'Compliance';return'Other';}
+async function readFile(file){if(!file)return[];const workbook=XLSX.read(await file.arrayBuffer(),{type:'array'});return XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]],{defval:''});}
 
-// رسالة تأكيد فورية للتأكد من تخطي الكاش بنجاح
-alert("🚀 تم تشغيل النسخة المحصنة بنسبة 100% بنجاح! اضغط OK.");
-
-var ALIASES = {
-    agent: ['agent','name','user','الوكيل','الموظف','اسم'],
-    score: ['score','compliance','الدرجة','النسبة','المعدل'],
-    section: ['section','category','الفئة','القسم','نوع المعيار'],
-    attribute: ['attribute','البند','المعيار','السلوك'],
-    severity: ['severity','خطورة','الخطورة'],
-    reason: ['reason','سبب','السبب'],
-    comment: ['comment','ملاحظات','التعليق'],
-    monitoringId: ['monitoring','evaluation','call','id','رقم','المكالمة'],
-    transactionType: ['transaction','type','direction','اتجاه','نوع']
-};
-
-function norm(v) {
-    return String(v || '').trim().toLowerCase().replace(/[_-]+/g,' ').replace(/\s+/g,' ');
-}
-
-function txt(v, fb) {
-    var fallback = fb || 'Not specified';
-    return String(v || '').trim() || fallback;
-}
-
-function getCol(row, key, fbIdx) {
-    if (!row) return null;
-    var keys = Object.keys(row);
-    var found = keys.find(function(h) {
-        return ALIASES[key].some(function(a) {
-            return norm(h).includes(a) || a.includes(norm(h));
-        });
-    });
-    return found || keys[fbIdx] || null;
-}
-
-function val(row, key, fbIdx) {
-    var defaultIdx = fbIdx || 0;
-    var c = getCol(row, key, defaultIdx);
-    return c ? row[c] : '';
-}
-
-function parseNum(v) {
-    if (v === null || v === undefined || v === '') return null;
-    var n = parseFloat(String(v).replace('%',''));
-    return Number.isFinite(n) ? (n <= 1 ? n * 100 : n) : null;
-}
-
-function getCat(row) {
-    var t = (val(row,'section',2) + " " + val(row,'severity',4) + " " + val(row,'attribute',3)).toLowerCase();
-    if (t.includes('business') || t.includes('بيزنس') || t.includes('عمليات')) return 'Business Critical';
-    if (t.includes('end user') || t.includes('عميل') || t.includes('نهائي')) return 'End User Critical';
-    if (t.includes('compliance') || t.includes('امتثال') || t.includes('نظامي')) return 'Compliance';
-    return 'Soft Skills';
-}
-
-function processData(failedRows, summaryRows) {
-    var rowsSummary = summaryRows || [];
-    var calls = new Map(), sumTypes = new Map();
+function analyseCalls(failed, allSummaryRows = []) {
+    const map = new Map();
     
-    rowsSummary.forEach(function(r) {
-        var id = txt(val(r,'monitoringId',7)), t = txt(val(r,'transactionType',8));
-        if (id && t) sumTypes.set(norm(id), t);
-    });
-
-    failedRows.forEach(function(r) {
-        var ag = txt(val(r,'agent',0),'Unknown agent');
-        var id = txt(val(r,'monitoringId',7),'Unknown ID');
-        var k = ag + "::" + id;
-        if (!calls.has(k)) {
-            calls.set(k, { id: id, agent: ag, type: sumTypes.get(norm(id)) || 'Inbound', soft: 0, biz: 0, eu: 0, comp: 0 });
-        }
-        var c = calls.get(k), type = getCat(r);
-        if (type === 'Soft Skills') c.soft++;
-        if (type === 'Business Critical') c.biz++;
-        if (type === 'End User Critical') c.eu++;
-        if (type === 'Compliance') c.comp++;
-    });
-
-    rowsSummary.forEach(function(r) {
-        var ag = txt(val(r,'agent',0),'Unknown agent');
-        var id = txt(val(r,'monitoringId',7),'');
-        if (id && !calls.has(ag + "::" + id)) {
-            calls.set(ag + "::" + id, { id: id, agent: ag, type: txt(val(r,'transactionType',8),'Inbound'), soft:0, biz:0, eu:0, comp:0 });
+    // بناء قاموس سريع لمعرفة نوع المكالمة من الـ Summary report باستخدام الـ Call ID
+    const summaryTypeMap = new Map();
+    allSummaryRows.forEach(row => {
+        const id = cleanText(value(row, 'monitoringId'));
+        const tType = cleanText(value(row, 'transactionType'));
+        if (id && tType) {
+            summaryTypeMap.set(normalise(id), tType);
         }
     });
+    
+    // أولاً: معالجة البيانات من الـ Detailed Report لجمع الأخطاء
+    failed.forEach((row, index) => {
+        const id = cleanText(value(row, 'monitoringId'), `Row ${index + 1}`);
+        const agent = cleanText(value(row, 'agent'), 'Unknown agent');
+        
+        // محاولة جلب النوع من الـ Detailed أولاً، لو مش موجود بنجيبه من الـ Summary، لو مش موجود بيبقى الـ Default هو Inbound
+        let tType = cleanText(value(row, 'transactionType'), '');
+        if (!tType) {
+            tType = summaryTypeMap.get(normalise(id)) || 'Inbound';
+        }
+        
+        const key = `${agent}::${id}`;
+        if (!map.has(key)) {
+            map.set(key, { id, agent, type: tType, softAttributes: new Set(), business: 0, endUser: 0, compliance: 0 });
+        }
+        const call = map.get(key);
+        const type = category(row);
+        if (type === 'Soft Skills') call.softAttributes.add(normalise(cleanText(value(row, 'attribute'))));
+        if (type === 'Business Critical') call.business++;
+        if (type === 'End User Critical') call.endUser++;
+        if (type === 'Compliance') call.compliance++;
+    });
 
-    return Array.from(calls.values()).map(function(c) {
-        var calcSoft = function(s) {
-            if (s === 1) return 97.22;
-            if (s === 2) return 94.44;
-            if (s === 3) return 88.80;
-            if (s === 4) return 83.33;
-            if (s > 4) return Math.max(0, 100 - (s * 4.16));
-            return 100;
+    // ثانياً: دمج المكالمات الـ Passed اللي مظهرتش في الـ Detailed لأن مفيهاش أخطاء
+    allSummaryRows.forEach(row => {
+        const agent = cleanText(value(row, 'agent'), 'Unknown agent');
+        const id = cleanText(value(row, 'monitoringId'), '');
+        let tType = cleanText(value(row, 'transactionType'), 'Inbound');
+        if (id) {
+            const key = `${agent}::${id}`;
+            if (!map.has(key)) {
+                map.set(key, { id, agent, type: tType, softAttributes: new Set(), business: 0, endUser: 0, compliance: 0 });
+            }
+        }
+    });
+
+    return [...map.values()].map(call => {
+        const softCount = call.softAttributes.size;
+        const softDeduction = softCount * 2;
+        const calculatedScore = (call.business > 0 || call.endUser > 0) ? 0 : (100 - softDeduction);
+        const isFailed = call.business > 0 || call.endUser > 0 || calculatedScore < 90 || softCount >= 3;
+        
+        let reason = 'Not failed';
+        if (call.business > 0) reason = 'Business Critical';
+        else if (call.endUser > 0) reason = 'End User Critical';
+        else if (softCount >= 3) reason = `FAILED (3+ Soft Skills Defects: ${softCount} found)`;
+        else if (isFailed) reason = `Score (${calculatedScore}%) below 90% Target`;
+        
+        const scoresPerCategory = {
+            compliance: call.compliance > 0 ? 0 : 100,
+            endUser: call.endUser > 0 ? 0 : 100,
+            business: call.business > 0 ? 0 : 100,
+            soft: Math.max(0, 100 - softDeduction)
         };
-        c.scores = { compliance: c.comp > 0 ? 0 : 100, endUser: c.eu > 0 ? 0 : 100, business: c.biz > 0 ? 0 : 100, soft: calcSoft(c.soft) };
-        c.failed = c.scores.compliance < 99 || c.scores.soft < 90 || c.scores.business < 90 || c.scores.endUser < 90;
-        return c;
+
+        return { ...call, soft: softCount, failed: isFailed, failReason: reason, categoryScores: scoresPerCategory };
     });
 }
 
-function render(calls, summaryRows) {
-    var agMap = new Map();
-    summaryRows.forEach(function(r) {
-        var ag = txt(val(r,'agent',0),'Unknown agent'), s = parseNum(val(r,'score',1));
-        if (!agMap.has(ag)) agMap.set(ag, { name: ag, scores: [], fCalls: 0, comp:[], soft:[], biz:[], eu:[] });
-        if (s !== null) agMap.get(ag).scores.push(s);
+function removeDuplicateComments(rows){const seen=new Set();return rows.filter((row,index)=>{const id=cleanText(value(row,'monitoringId'),`Row ${index+1}`);const comment=String(value(row,'comment')??'').trim();if(!comment)return true;const key=`${id}::${normalise(comment)}`;if(seen.has(key))return false;seen.add(key);return true;});}
+function agentStats(summary,failed,calls){const map=new Map();const add=name=>{if(!map.has(name))map.set(name,{name,scores:[],mistakes:0,failedCalls:0});return map.get(name);};summary.forEach(row=>{const a=add(cleanText(value(row,'agent'),'Unknown agent')),score=parseScore(value(row,'score'));if(score!==null)a.scores.push(score);});failed.forEach(row=>add(cleanText(value(row,'agent'),'Unknown agent')).mistakes++);calls.filter(c=>c.failed).forEach(c=>add(c.agent).failedCalls++);return[...map.values()].map(a=>({...a,average:a.scores.length?a.scores.reduce((x,y)=>x+y,0)/a.scores.length:null,evaluations:a.scores.length})).sort((a,b)=>{const aHasFailed=a.failedCalls>0,bHasFailed=b.failedCalls>0;if(aHasFailed!==bHasFailed)return aHasFailed?1:-1;if(a.mistakes!==b.mistakes)return a.mistakes-b.mistakes;if(a.failedCalls!==b.failedCalls)return a.failedCalls-b.failedCalls;return(b.average??-1)-(a.average??-1);});}
+
+function renderAgentProfile(name){const profile=window.latestAgentProfiles?.get(name);if(!profile){$('agent-profile-content').innerHTML='<p class="empty">Select an agent to see the coaching profile.</p>';return;}const attribute=[...group(profile.errors,row=>value(row,'attribute')).entries()].sort((a,b)=>b[1]-a[1])[0];const reason=[...group(profile.errors,row=>value(row,'reason')).entries()].sort((a,b)=>b[1]-a[1])[0];const type=[...group(profile.errors,row=>category(row)).entries()].sort((a,b)=>b[1]-a[1])[0];const focus=type?.[0]||'No failed items';
+const coaching=focus==='Business Critical'?'Run an immediate one-to-one policy/process coaching, then monitor the next 5 evaluations.':focus==='End User Critical'?'Run an immediate one-to-one coaching focused on customer impact, then monitor the next 5 evaluations.':focus==='Soft Skills'?'Use call examples for a targeted soft-skills coaching. Each unique mistake deducts 2% from the call score. 3 mistakes fail the call.':focus==='Compliance'?'Run a compliance refresher and validate the next 5 evaluations.':'Maintain the current performance and continue normal monitoring.';
+$('agent-profile-content').innerHTML=`<div class="agent-profile-grid"><div class="profile-summary"><h4>${html(profile.agent.name)}</h4><p>${profile.agent.evaluations} evaluations · ${profile.agent.mistakes} failed items</p><div class="profile-metrics"><span><strong>${fmtScore(profile.agent.average)}</strong>Average score</span><span><strong>${profile.failedCalls.length}</strong>Failed calls</span><span><strong>${profile.errors.length}</strong>Zero-score items</span></div></div><div class="profile-detail"><p class="profile-label">PRIMARY FOCUS</p><strong>${html(focus)}</strong><p>Most repeated attribute: <b>${html(attribute?.[0]||'None')}</b>${attribute?` (${attribute[1]})`:''}</p><p>Top error reason: <b>${html(reason?.[0]||'None')}</b>${reason?` (${reason[1]})`:''}</p></div><div class="profile-detail coaching"><p class="profile-label">RECOMMENDED COACHING (TARGET: 90%)</p><p>${html(coaching)}</p></div></div>`;}
+
+function buildCoachingDraft(name) {
+    const profile = window.latestAgentProfiles?.get(name); if (!profile) return '';
+    const attribute = [...group(profile.errors, row => value(row, 'attribute')).entries()].sort((a, b) => b[1] - a[1])[0];
+    const reason = [...group(profile.errors, row => value(row, 'reason')).entries()].sort((a, b) => b[1] - a[1])[0];
+    const type = [...group(profile.errors, row => category(row)).entries()].sort((a, b) => b[1] - a[1])[0];
+    const focus = type?.[0] || 'quality performance';
+    const action = focus === 'Business Critical' ? 'Please revisit the relevant policy and process steps before handling the next similar case.' : focus === 'End User Critical' ? 'Please focus on call ownership, professionalism, and the customer impact of each interaction.' : focus === 'Soft Skills' ? 'Please review the relevant soft-skill behaviors. Note that each unique mistake deducts 2% from your score, and 3 soft-skill mistakes automatically fail the call.' : focus === 'Compliance' ? 'Please revisit the required documentation and compliance steps before closing each case.' : 'Please maintain the current quality standard.';
+    return `Subject: Quality Coaching Follow-up – ${profile.agent.name}\n\nHi ${profile.agent.name},\n\nDuring the latest QA monitoring period, ${profile.errors.length} zero-score item(s) were identified across ${profile.failedCalls.length} failed call(s).\n\nObservation:\nYour main focus area is ${focus}.${attribute ? ` The most repeated attribute was "${attribute[0]}" (${attribute[1]} occurrence(s)).` : ''}${reason ? ` The main error reason was "${reason[0]}".` : ''}\n\nImpact:\nThis can affect the customer experience, score targets, and overall quality performance.\n\nAction plan:\n1. ${action}\n2. Review the feedback examples shared during the coaching session.\n3. Apply the agreed action on all relevant calls to maintain the 90% target.\n\nFollow-up:\nYour next 5 evaluations will be monitored to confirm improvement.\n\nRegards,\nQuality Team`;
+}
+function buildManagementBrief(){const report=window.latestReportData;if(!report)return'';const topAttribute=report.attributes[0],topReason=report.reasons[0];const priorities=[...report.agents].sort((a,b)=>b.failedCalls-a.failedCalls||b.mistakes-a.mistakes).filter(a=>a.failedCalls||a.mistakes).slice(0,3);const categoryLine=Object.entries(report.counts).filter(([,count])=>count).map(([type,count])=>`${type}: ${count}`).join(' | ')||'No failed items found';return `Quality Pulse AI – Management Brief (Target: 90%)\n\nOverall performance\n• Average QA score: ${fmtScore(report.average)}\n• Total evaluations: ${report.evaluations}\n• Agents covered: ${report.agents.length}\n• Failed calls (Below 90%, Critical, or 3+ Soft Skills): ${report.failedCalls.length}\n• Failed items (Score = 0): ${report.failed.length}\n\nQuality breakdown\n${categoryLine}\n\nMain root cause\n• Top attribute: ${topAttribute?`${topAttribute[0]} (${topAttribute[1]} occurrences)`:'No data'}\n• Top error reason: ${topReason?`${topReason[0]} (${topReason[1]} occurrences)`:'No data'}\n\nPriority agents\n${priorities.length?priorities.map((agent,index)=>`${index+1}. ${agent.name}: ${agent.failedCalls} failed call(s), ${agent.mistakes} failed item(s), score ${fmtScore(agent.average)}`).join('\n'):'No immediate coaching priorities identified.'}\n\nRecommended next action\nFocus the next refresher or calibration on ${topAttribute?.[0]||'the leading quality issue'}, then monitor the next 5 evaluations for priority agents.`;}
+function buildDMAICPlan(){const report=window.latestReportData;if(!report)return'';const attribute=report.attributes[0],reason=report.reasons[0],focusType=Object.entries(report.counts).sort((a,b)=>b[1]-a[1])[0]?.[0]||'Quality';const attributeName=attribute?.[0]||'the leading quality attribute';const occurrences=attribute?.[1]||0;const improvement=focusType==='Business Critical'?'Deliver an immediate policy/process refresher, calibrate edge cases, and use targeted one-to-one coaching.':focusType==='End User Critical'?'Run a customer-impact and call-ownership refresher, then calibrate expected behaviors with sample interactions.':focusType==='Soft Skills'?'Run a soft-skills refresher using real call examples and reinforce the 2% deduction rule (3 mistakes fail the call automatically).':'Run a focused compliance refresher and validate the required steps with a checklist.';return `Quality Pulse AI – DMAIC Improvement Plan\n\nProject title\nReduce ${attributeName} failures\n\nDEFINE\nProblem: ${attributeName} is the most repeated failed attribute, with ${occurrences} zero-score occurrence(s). This contributes to ${report.failedCalls.length} failed call(s).\nGoal: Reduce ${attributeName} failed items in the next monitoring cycle while keeping scores above the 90% target.\n\nMEASURE\nBaseline: ${report.failed.length} total zero-score items across ${report.evaluations} evaluation(s).\nPrimary metric: number of zero-score ${attributeName} items.\nSecondary metric: failed calls linked to ${focusType}.\n\nANALYZE\nLeading error reason: ${reason?`${reason[0]} (${reason[1]} occurrence(s))`:'Review detailed comments to confirm the leading cause'}.\nData rule: duplicate Error Reason Comments within the same Call ID are excluded; only the first occurrence is counted.\n\nIMPROVE\n${improvement}\nUse the affected Call IDs as examples during coaching and assign clear action points to priority agents.\n\nCONTROL\n1. Monitor the next 5 evaluations for each priority agent.\n2. Review the same attribute weekly in Quality Pulse.\n3. Recalibrate if the failed-item count does not reduce.\n4. Report results using the Management Brief and compare with this baseline.`;}
+
+function renderTransactionPivotTables(calls) {
+    const pivot = {};
+    const typesSeen = new Set();
+    
+    calls.forEach(c => {
+        let type = c.type || 'Inbound';
+        // توحيد المسميات عشان تظهر مظبوطة زي الشيت (مثلا لو المسمى طويل)
+        if (type.toLowerCase().includes('inbound')) type = 'Inbound';
+        if (type.toLowerCase().includes('outbound')) type = 'Outbound';
+        
+        typesSeen.add(type);
+        if (!pivot[type]) pivot[type] = {};
+        if (!pivot[type][c.agent]) {
+            pivot[type][c.agent] = { compliance: [], endUser: [], business: [], soft: [] };
+        }
+        const aData = pivot[type][c.agent];
+        aData.compliance.push(c.categoryScores.compliance);
+        aData.endUser.push(c.categoryScores.endUser);
+        aData.business.push(c.categoryScores.business);
+        aData.soft.push(c.categoryScores.soft);
     });
 
-    calls.forEach(function(c) {
-        if (!agMap.has(c.agent)) agMap.set(c.agent, { name: c.agent, scores: [], fCalls: 0, comp:[], soft:[], biz:[], eu:[] });
-        var a = agMap.get(c.agent);
-        if (c.failed) a.fCalls++;
-        a.comp.push(c.scores.compliance); a.soft.push(c.scores.soft); a.biz.push(c.scores.business); a.eu.push(c.scores.endUser);
+    let htmlOutput = `<h3 style="margin-top:35px; color:#fff; border-bottom:2px solid #3b82f6; padding-bottom:8px;">Score Per Agent (By Transaction Type)</h3>`;
+    
+    const orderedTypes = [...typesSeen].sort();
+    if(orderedTypes.length === 0) orderedTypes.push('Inbound');
+
+    orderedTypes.forEach(tType => {
+        const agentsData = pivot[tType] || {};
+        const agentNames = Object.keys(agentsData).sort();
+        
+        htmlOutput += `
+        <div style="margin-bottom: 25px; background: #1e293b; padding: 15px; border-radius: 8px;">
+            <h4 style="color:#60a5fa; margin-bottom:10px; text-transform: uppercase; font-weight: bold;">Direction: ${html(tType)}</h4>
+            <table style="width:100%; border-collapse:collapse; text-align:left; color:#f8fafc;">
+                <thead>
+                    <tr style="background:#334155; color:#94a3b8; font-size:13px;">
+                        <th style="padding:10px; border:1px solid #475569;">Agent Name</th>
+                        <th style="padding:10px; border:1px solid #475569;">Average of %Compliance</th>
+                        <th style="padding:10px; border:1px solid #475569;">Average of %End User Critical</th>
+                        <th style="padding:10px; border:1px solid #475569;">Average of %Business Critical</th>
+                        <th style="padding:10px; border:1px solid #475569;">Average of %Softskills</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+                
+        let totalComp = 0, totalEU = 0, totalBiz = 0, totalSoft = 0, totalCount = 0;
+        
+        if (agentNames.length === 0) {
+            htmlOutput += `<tr><td colspan="5" style="padding:10px; text-align:center; color:#64748b;">No interactions registered for this type.</td></tr>`;
+        } else {
+            agentNames.forEach(aName => {
+                const d = agentsData[aName];
+                const avg = arr => arr.length ? (arr.reduce((a,b)=>a+b,0) / arr.length) : 100;
+                const ac = avg(d.compliance), aeu = avg(d.endUser), ab = avg(d.business), as = avg(d.soft);
+                
+                totalComp += ac; totalEU += aeu; totalBiz += ab; totalSoft += as; totalCount++;
+                
+                htmlOutput += `
+                <tr style="border-bottom:1px solid #334155;">
+                    <td style="padding:10px; border:1px solid #475569; font-weight:500;">${html(aName)}</td>
+                    <td style="padding:10px; border:1px solid #475569; color:${ac<90?'#f87171':'#34d399'}">${ac.toFixed(1)}%</td>
+                    <td style="padding:10px; border:1px solid #475569; color:${aeu<90?'#f87171':'#34d399'}">${aeu.toFixed(1)}%</td>
+                    <td style="padding:10px; border:1px solid #475569; color:${ab<90?'#f87171':'#34d399'}">${ab.toFixed(1)}%</td>
+                    <td style="padding:10px; border:1px solid #475569; color:${as<90?'#f87171':'#34d399'}">${as.toFixed(1)}%</td>
+                </tr>`;
+            });
+            
+            const gComp = totalComp / totalCount, gEU = totalEU / totalCount, gBiz = totalBiz / totalCount, gSoft = totalSoft / totalCount;
+            htmlOutput += `
+                <tr style="background:#1e293b; font-weight:bold; border-top:2px solid #475569;">
+                    <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">Grand Total</td>
+                    <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">${gComp.toFixed(1)}%</td>
+                    <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">${gEU.toFixed(1)}%</td>
+                    <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">${gBiz.toFixed(1)}%</td>
+                    <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">${gSoft.toFixed(1)}%</td>
+                </tr>`;
+        }
+        
+        htmlOutput += `</tbody></table></div>`;
     });
 
-    var agents = Array.from(agMap.values()).map(function(a) {
-        var avg = function(arr) { return arr.length ? arr.reduce(function(x,y){return x+y;},0)/arr.length : 100; };
-        a.avgSoft = avg(a.soft); a.avgBiz = avg(a.biz); a.avgEU = avg(a.eu); a.avgComp = avg(a.comp);
-        a.finalAvg = a.scores.length ? avg(a.scores) : (a.avgSoft + a.avgBiz + a.avgEU + a.avgComp)/4;
-        return a;
-    }).sort(function(a,b) { return b.fCalls - a.fCalls || a.finalAvg - b.finalAvg; });
-
-    var allScores = agents.flatMap(function(a) { return a.scores; });
-    var totAvg = allScores.length ? allScores.reduce(function(x,y){return x+y;},0)/allScores.length : (agents.reduce(function(x,y){return x+y.finalAvg;},0)/(agents.length||1));
-
-    var setT = function(id, v) { if(window.$(id)) window.$(id).textContent = v; };
-    setT('avg-score', totAvg.toFixed(2) + "%");
-    setT('evaluations', summaryRows.length || calls.length || '0');
-    setT('agents', agents.length || '0');
-    setT('critical-errors', calls.filter(function(c){ return c.failed; }).length);
-
-    var list = window.$('ranking-list') || document.querySelector('.space-y-4');
-    if (list) {
-        var htmlList = "";
-        agents.forEach(function(a, i) {
-            htmlList += "<div style='padding:12px; border-bottom:1px solid #334155; display:flex; justify-content:space-between; align-items:center; background:#1e293b; margin-bottom:8px; border-radius:6px;'>" +
-                "<span style='color:#94a3b8; font-weight:bold; width:24px;'>" + (i+1) + "</span>" +
-                "<div style='flex-grow:1; margin-left:10px;'>" +
-                    "<div style='font-weight:bold; color:#f8fafc;'>" + a.name + "</div>" +
-                    "<div style='font-size:12px; color:#94a3b8; margin-top:4px;'>" +
-                        "Soft: <span style='color:" + (a.avgSoft<90?'#f87171':'#34d399') + "'>" + a.avgSoft.toFixed(2) + "%</span> | " +
-                        "Biz: <span style='color:" + (a.avgBiz<90?'#f87171':'#34d399') + "'>" + a.avgBiz.toFixed(2) + "%</span> | " +
-                        "EU: <span style='color:" + (a.avgEU<90?'#f87171':'#34d399') + "'>" + a.avgEU.toFixed(2) + "%</span> | " +
-                        "Comp: <span style='color:" + (a.avgComp<99?'#f87171':'#34d399') + "'>" + a.avgComp.toFixed(2) + "%</span>" +
-                    "</div>" +
-                "</div>" +
-                "<span style='font-weight:bold; color:#60a5fa;'>" + a.finalAvg.toFixed(2) + "%</span>" +
-            "</div>";
-        });
-        list.innerHTML = htmlList;
+    let targetContainer = $('transaction-pivot-container');
+    if(!targetContainer) {
+        targetContainer = document.createElement('div');
+        targetContainer.id = 'transaction-pivot-container';
+        const placementTarget = $('failed-calls-table') || document.body;
+        placementTarget.parentNode.insertBefore(targetContainer, placementTarget);
     }
-    renderPivot(calls);
+    targetContainer.innerHTML = htmlOutput;
 }
 
-function renderPivot(calls) {
-    var pivot = {}, types = new Set();
-    calls.forEach(function(c) {
-        var t = c.type.toLowerCase().includes('outbound') ? 'Outbound' : 'Inbound';
-        types.add(t);
-        if (!pivot[t]) pivot[t] = {};
-        if (!pivot[t][c.agent]) pivot[t][c.agent] = { comp: [], eu: [], biz: [], soft: [] };
-        pivot[t][c.agent].comp.push(c.scores.compliance);
-        pivot[t][c.agent].eu.push(c.scores.endUser);
-        pivot[t][c.agent].biz.push(c.scores.business);
-        pivot[t][c.agent].soft.push(c.scores.soft);
-    });
+function render({summary,detailed}){const hasScore=findColumn(detailed[0],'score'),rawFailed=hasScore?detailed.filter(r=>isZeroScore(value(r,'score'))):[],failed=removeDuplicateComments(rawFailed),duplicatesRemoved=rawFailed.length-failed.length,calls=analyseCalls(failed, summary),agents=agentStats(summary,failed,calls),scores=agents.flatMap(a=>a.scores),avg=scores.length?scores.reduce((a,b)=>a+b,0)/scores.length:null,failedCalls=calls.filter(c=>c.failed),types=['Soft Skills','Compliance','Business Critical','End User Critical'],counts=Object.fromEntries(types.map(t=>[t,failed.filter(r=>category(r)===t).length])),attributes=[...group(failed,r=>value(r,'attribute')).entries()].sort((a,b)=>b[1]-a[1]),reasons=[...group(failed,r=>value(r,'reason')).entries()].sort((a,b)=>b[1]-a[1]);
+ $('avg-score').textContent=fmtScore(avg);$('evaluations').textContent=summary.length||'--';$('agents').textContent=agents.length||'--';$('critical-errors').textContent=failedCalls.length;$('avg-note').textContent=scores.length?'Across scored evaluations':'No score column found';$('period-label').textContent=`${failed.length} failed items (Score = 0); ${failedCalls.length} failed calls; ${duplicatesRemoved} duplicate comments removed. Target: 90%.`;
+ $('category-breakdown').innerHTML=types.map(t=>`<div class="category-card"><strong>${t}</strong><span>${counts[t]} failed items</span>${t==='Soft Skills'?`<small>Each unique mistake deducts 2% · 3 mistakes fail call</small>`:''}</div>`).join('');
+ $('ranking-list').innerHTML=agents.slice(0,8).map((a,i)=>`<div class="ranking-row"><span class="rank">${i+1}</span><div><div class="agent-name">${a.name}</div><div class="agent-meta">${a.evaluations} evaluations · ${a.mistakes} failed items · ${a.failedCalls} failed calls</div></div><span class="score">${fmtScore(a.average)}</span></div>`).join('')||'<p class="empty">No agents found.</p>';
+ const max=(attributes[0] && attributes[0][1])?attributes[0][1]:1;$('pareto-list').innerHTML=attributes.slice(0,6).map(([n,c])=>`<div class="bar-row"><div><div class="bar-label">${n}</div><div class="bar"><span style="width:${c/max*100}%"></span></div></div><div class="bar-value">${c}</div></div>`).join('')||'<p class="empty">No failed items found.</p>';
+ const outliers=[...agents].sort((a,b)=>b.failedCalls-a.failedCalls||(a.average??101)-(b.average??101)||b.mistakes-a.mistakes).slice(0,5);$('outlier-list').innerHTML=outliers.map(a=>`<div class="outlier"><div class="outlier-top"><span>${a.name}</span><span class="priority">${a.failedCalls?'High':'Review'}</span></div><p>${fmtScore(a.average)} · ${a.failedCalls} failed calls · ${a.mistakes} failed items</p></div>`).join('')||'<p class="empty">No outliers calculated yet.</p>';
+ const actions=types.filter(t=>counts[t]).sort((a,b)=>counts[b]-counts[a]).slice(0,3).map(t=>`<div class="action-item"><strong>${t} — ${counts[t]} failed items</strong><p>${t==='Soft Skills'?'Each unique soft-skill mistake deducts 2%. 3 or more soft-skill mistakes automatically fail the call.':t==='Compliance'?'Use a compliance refresher and monitor the next evaluations.':'Review immediately: this category fails the call.'}</p></div>`);$('action-plan').innerHTML=actions.join('')||'<p class="empty">No recommendations available.</p>';
+ $('reason-table').innerHTML=reasons.length?`<table><thead><tr><th>Error reason</th><th>Occurrences</th><th>Share</th></tr></thead><tbody>${reasons.slice(0,12).map(([n,c])=>`<tr><td>${n}</td><td>${c}</td><td>${(c/(failed.length||1)*100).toFixed(1)}%</td></tr>`).join('')}</tbody></table>`:'<p class="empty">No zero-score errors found.</p>';
+ $('failed-calls-table').innerHTML=failed.length?`<table><thead><tr><th>Call ID</th><th>Agent</th><th>Type</th><th>Attribute</th><th>Error reason</th><th>Comment</th><th>Severity</th></tr></thead><tbody>${failed.slice(0,75).map((r,i)=>`<tr><td>${cleanText(value(r,'monitoringId'),`Row ${i+1}`)}</td><td>${cleanText(value(r,'agent'),'Unknown agent')}</td><td>${category(r)}</td><td>${cleanText(value(r,'attribute'))}</td><td>${cleanText(value(r,'reason'))}</td><td>${cleanText(value(r,'comment'),'-')}</td><td>${cleanText(value(r,'severity'),'-')}</td></tr>`).join('')}</tbody></table>`:'<p class="empty">No zero-score items available.</p>';
+ window.latestCallResults=calls;$('call-results-table').innerHTML=calls.length?`<table><thead><tr><th>Call ID</th><th>Agent</th><th>Result</th><th>Fail reason</th><th>Unique Soft Skills</th><th>Business Critical</th><th>End User Critical</th><th>Compliance</th></tr></thead><tbody>${calls.map(call=>`<tr><td>${html(call.id)}</td><td>${html(call.agent)}</td><td><span class="result ${call.failed?'failed':'passed'}">${call.failed?'FAILED':'PASSED'}</span></td><td>${html(call.failReason)}</td><td>${call.soft}</td><td>${call.business}</td><td>${call.endUser}</td><td>${call.compliance}</td></tr>`).join('')}</tbody></table>`:'<p class="empty">No zero-score items available.</p>';
+ 
+ renderTransactionPivotTables(calls);
 
-    var html = "<h3 style='margin-top:35px; color:#fff; border-bottom:2px solid #3b82f6; padding-bottom:8px;'>Score Per Agent (By Transaction Type)</h3>";
-    Array.from(types).forEach(function(t) {
-        html += "<div style='margin-bottom:25px; background:#1e293b; padding:15px; border-radius:8px;'>" +
-            "<h4 style='color:#60a5fa; margin-bottom:10px; font-weight:bold;'>Direction: " + t + "</h4>" +
-            "<table style='width:100%; border-collapse:collapse; text-align:left; color:#f8fafc;'>" +
-                "<thead>" +
-                    "<tr style='background:#334155; color:#94a3b8; font-size:13px;'>" +
-                        "<th style='padding:10px; border:1px solid #475569;'>Agent Name</th>" +
-                        "<th style='padding:10px; border:1px solid #475569;'>Average of %Compliance</th>" +
-                        "<th style='padding:10px; border:1px solid #475569;'>Average of %End User Critical</th>" +
-                        "<th style='padding:10px; border:1px solid #475569;'>Average of %Business Critical</th>" +
-                        "<th style='padding:10px; border:1px solid #475569;'>Average of %Softskills</th>" +
-                    "</tr>" +
-                "</thead><tbody>";
-        Object.keys(pivot[t]).sort().forEach(function
+ const previousSelection=$('agent-select').value;window.latestAgentProfiles=new Map(agents.map(agent=>[agent.name,{agent,errors:failed.filter(row=>cleanText(value(row,'agent'),'Unknown agent')===agent.name),failedCalls:failedCalls.filter(call=>call.agent===agent.name)}]));window.latestReportData={average:avg,evaluations:summary.length,agents,failed,failedCalls,counts,attributes,reasons};$('agent-select').innerHTML=`<option value="">Select an agent</option>${agents.map(agent=>`<option value="${html(agent.name)}">${html(agent.name)}</option>`).join('')}`;const selected=window.latestAgentProfiles.has(previousSelection)?previousSelection:agents[0]?.name||'';$('agent-select').value=selected;renderAgentProfile(selected);
+}
+const demo={summary:[['Ahmed',90,'Inbound','M-101'],['Ahmed',94,'Outbound','M-102'],['Sara',92,'Inbound','M-103'],['Mohamed',84,'Outbound','M-104']].map(([a,s,t,i])=>({'Agent Name':a,'QA Score':s, 'Transaction Type': t, 'Monitoring ID': i})),detailed:[['M-101','Ahmed','Soft Skills','Greeting','Minor','Late greeting',''],['M-101','Ahmed','Soft Skills','Hold','Minor','Long hold',''],['M-101','Ahmed','Soft Skills','Closing','Minor','No closing',''],['M-104','Mohamed','Business Critical','Policy','Business Critical','Wrong policy','Wrong promise']].map(([id,a,section,attribute,severity,reason,comment])=>({'Monitoring ID':id,'Agent Name':a,Section:section,'Attribute Name':attribute,Severity:severity,'Error Reason':reason,'Error Reason Comment':comment,Score:0, 'Transaction Type': 'Inbound'}))};
+$('demo-button').addEventListener('click',()=>{render(demo);showStatus('Demo data loaded.');});$('analyze-button').addEventListener('click',async()=>{try{const sf=$('summary-file').files[0],df=$('detailed-file').files[0];if(!df)return showStatus('Please select the Detailed report first.',true);showStatus('Reading reports...');const[summary,detailed]=await Promise.all([readFile(sf),readFile(df)]);if(!detailed.length)return showStatus('The Detailed report has no rows.',true);render({summary,detailed});showStatus(findColumn(detailed[0],'score')?'Analysis complete.':'Score column was not found in Detailed.',!findColumn(detailed[0],'score'));}catch(e){console.error(e);showStatus('Could not read one of the files.',true);}});
+$('agent-select').addEventListener('change',event=>renderAgentProfile(event.target.value));
+$('generate-coaching-button').addEventListener('click',()=>{const name=$('agent-select').value;const draft=buildCoachingDraft(name);if(!draft){showStatus('Analyze a report and select an Agent first.',true);return;}$('coaching-draft').value=draft;showStatus('Coaching draft generated.');});
+$('copy-coaching-button').addEventListener('click',async()=>{const draft=$('coaching-draft').value;if(!draft){showStatus('Generate a coaching draft first.',true);return;}try{await navigator.clipboard.writeText(draft);showStatus('Coaching draft copied.');}catch(e){$('coaching-draft').focus();$('coaching-draft').select();showStatus('Select and copy the draft manually.');}});
+$('generate-brief-button').addEventListener('click',()=>{const brief=buildManagementBrief();if(!brief){showStatus('Analyze a report first.',true);return;}$('management-brief-draft').value=brief;showStatus('Management brief generated.');});
+$('copy-brief-button').addEventListener('click',async()=>{const brief=$('management-brief-draft').value;if(!brief){showStatus('Generate a management brief first.',true);return;}try{await navigator.clipboard.writeText(brief);showStatus('Management brief copied.');}catch(e){$('management-brief-draft').focus();$('management-brief-draft').select();showStatus('Select and copy the brief manually.');}});
+$('generate-dmaic-button').addEventListener('click',()=>{const plan=buildDMAICPlan();if(!plan){showStatus('Analyze a report first.',true);return;}$('dmaic-draft').value=plan;showStatus('DMAIC improvement plan generated.');});
+$('copy-dmaic-button').addEventListener('click',async()=>{const plan=$('dmaic-draft').value;if(!plan){showStatus('Generate a DMAIC plan first.',true);return;}try{await navigator.clipboard.writeText(plan);showStatus('DMAIC plan copied.');}catch(e){$('dmaic-draft').focus();$('dmaic-draft').select();showStatus('Select and copy the plan manually.');}});
+$('export-calls-button').addEventListener('click',()=>{const calls=window.latestCallResults||[];if(!calls.length){showStatus('Analyze a Detailed report before exporting.',true);return;}const rows=[['Call ID','Agent','Result','Fail reason','Unique Soft Skills','Business Critical','End User Critical','Compliance'],...calls.map(c=>[c.id,c.agent,c.failed?'FAILED':'PASSED',c.failReason,c.soft,c.business,c.endUser,c.compliance])];const text=rows.map(row=>row.map(v=>`"${csv(v).replace(/"/g,'""')}"`).join(',')).join('\r\n');const link=document.createElement('a');link.href=URL.createObjectURL(new Blob([text],{type:'text/csv;charset=utf-8'}));link.download='quality-pulse-call-results.csv';link.click();URL.revokeObjectURL(link.href);showStatus('Call results exported.');});

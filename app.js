@@ -1,10 +1,64 @@
-const COLUMN_ALIASES={agent:['agent name','agent','full name','user name','agent name (full name)'],score:['score','score %','attribute score','qa score','total score','overall score','total compliance'],section:['section','section name','category','attribute category'],attribute:['attribute name','attribute'],severity:['severity'],reason:['error reason','reason','error reason name'],comment:['error reason comment','comment','reason comment'],monitoringId:['monitoring id','evaluation id','interaction id','call id','id'],transactionType:['transaction type','type','direction','call type']};
-const $=id=>document.getElementById(id),normalise=v=>String(v??'').trim().toLowerCase().replace(/[_-]+/g,' ').replace(/\s+/g,' '),cleanText=(v,fallback='Not specified')=>String(v??'').trim()||fallback;
-function findColumn(row,key){return Object.keys(row||{}).find(header=>COLUMN_ALIASES[key].includes(normalise(header)));}function value(row,key){const column=findColumn(row,key);return column?row[column]:'';}function parseScore(v){const n=parseFloat(String(v).replace('%',''));return Number.isFinite(n)?(n<=1?n*100:n):null;}function group(rows,key){return rows.reduce((m,row)=>{const label=cleanText(key(row));m.set(label,(m.get(label)||0)+1);return m;},new Map());}function fmtScore(n){return n===null||Number.isNaN(n)?'--':`${n.toFixed(2)}%`;}function showStatus(text,isError=false){$('status').textContent=text;$('status').style.color=isError?'#d94b5b':'#69758a';}
-function html(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}function csv(v){const text=String(v??'');return /^[=+\-@]/.test(text)?`'${text}`:text;}
+// 1. الأكواد الثابتة والـ Aliases للتعرف على الأعمدة
+const COLUMN_ALIASES = {
+    agent: ['agent name','agent','full name','user name','agent name (full name)'],
+    score: ['score','score %','attribute score','qa score','total score','overall score','total compliance'],
+    section: ['section','section name','category','attribute category'],
+    attribute: ['attribute name','attribute'],
+    severity: ['severity'],
+    reason: ['error reason','reason','error reason name'],
+    comment: ['error reason comment','comment','reason comment'],
+    monitoringId: ['monitoring id','evaluation id','interaction id','call id','id'],
+    transactionType: ['transaction type','type','direction','call type']
+};
 
-function category(row){const text=`${value(row,'section')}${value(row,'severity')}`.toLowerCase();if(text.includes('business critical'))return'Business Critical';if(text.includes('end user critical')||text.includes('end-user critical'))return'End User Critical';if(text.includes('soft'))return'Soft Skills';if(text.includes('compliance'))return'Compliance';return'Other';}
-async function readFile(file){if(!file)return[];const workbook=XLSX.read(await file.arrayBuffer(),{type:'array'});return XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]],{defval:''});}
+const $ = id => document.getElementById(id);
+const normalise = v => String(v ?? '').trim().toLowerCase().replace(/[_-]+/g,' ').replace(/\s+/g,' ');
+const cleanText = (v, fallback = 'Not specified') => String(v ?? '').trim() || fallback;
+
+function findColumn(row, key) {
+    return Object.keys(row || {}).find(header => COLUMN_ALIASES[key].includes(normalise(header)));
+}
+
+function value(row, key) {
+    const column = findColumn(row, key);
+    return column ? row[column] : '';
+}
+
+function parseScore(v) {
+    const n = parseFloat(String(v).replace('%',''));
+    return Number.isFinite(n) ? (n <= 1 ? n * 100 : n) : null;
+}
+
+function fmtScore(n) {
+    return n === null || Number.isNaN(n) ? '--' : `${n.toFixed(2)}%`;
+}
+
+function html(v) {
+    return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function category(row) {
+    const text = `${value(row,'section')}${value(row,'severity')}`.toLowerCase();
+    if (text.includes('business critical')) return 'Business Critical';
+    if (text.includes('end user critical') || text.includes('end-user critical')) return 'End User Critical';
+    if (text.includes('soft')) return 'Soft Skills';
+    if (text.includes('compliance')) return 'Compliance';
+    return 'Other';
+}
+
+// 2. دالة قراءة ملف الإكسيل وتحويله لـ JSON
+async function readFile(file) {
+    if (!file) return [];
+    try {
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        return XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
+    } catch (e) {
+        console.error("Error reading file:", e);
+        return [];
+    }
+}
 
 function getUniqueErrors(rows) {
     const seen = new Set();
@@ -27,6 +81,7 @@ function calculateSoftSkillsScore(errorCount) {
     return 100;
 }
 
+// 3. تحليل المكالمات والربط بين شيت الـ Detailed والـ Summary
 function analyseCalls(failedRows, allSummaryRows = []) {
     const map = new Map();
     const summaryTypeMap = new Map();
@@ -69,12 +124,7 @@ function analyseCalls(failedRows, allSummaryRows = []) {
         };
 
         const isFailed = scores.compliance < 99 || scores.soft < 90 || scores.business < 90 || scores.endUser < 90;
-        
-        let failReason = 'Passed';
-        if (scores.compliance < 99) failReason = 'Compliance Failure';
-        else if (scores.business < 90) failReason = 'Business Critical Zero';
-        else if (scores.endUser < 90) failReason = 'End User Critical Zero';
-        else if (scores.soft < 90) failReason = `Soft Skills Drop (${scores.soft}%)`;
+        let failReason = isFailed ? 'Failed' : 'Passed';
 
         map.set(key, { id, agent, type: tType, soft: softErrors, business: businessErrors, endUser: endUserErrors, compliance: complianceErrors, failed: isFailed, failReason, categoryScores: scores });
     });
@@ -98,6 +148,7 @@ function analyseCalls(failedRows, allSummaryRows = []) {
     return [...map.values()];
 }
 
+// 4. حساب إحصائيات الموظفين
 function agentStats(summary, failedRows, calls) {
     const map = new Map();
     const add = name => {
@@ -130,7 +181,6 @@ function agentStats(summary, failedRows, calls) {
         const avgBiz = calcAvg(a.bizScores);
         const avgEU = calcAvg(a.euScores);
         
-        // تم تصليح الغلطة هنا ليعود الحساب طبيعياً
         const finalAvg = a.scores.length ? a.scores.reduce((x,y)=>x+y,0)/a.scores.length : (avgSoft + avgBiz + avgEU + avgComp) / 4;
         
         return {
@@ -145,6 +195,7 @@ function agentStats(summary, failedRows, calls) {
     }).sort((a, b) => b.failedCalls - a.failedCalls || (a.average ?? 0) - (b.average ?? 0));
 }
 
+// 5. بناء جداول الـ Pivot لكل اتجاه (Inbound / Outbound)
 function renderTransactionPivotTables(calls) {
     const pivot = {};
     const typesSeen = new Set();
@@ -167,9 +218,8 @@ function renderTransactionPivotTables(calls) {
     });
 
     let htmlOutput = `<h3 style="margin-top:35px; color:#fff; border-bottom:2px solid #3b82f6; padding-bottom:8px;">Score Per Agent (By Transaction Type)</h3>`;
-    const orderedTypes = [...typesSeen].sort();
-
-    orderedTypes.forEach(tType => {
+    
+    [...typesSeen].sort().forEach(tType => {
         const agentsData = pivot[tType] || {};
         const agentNames = Object.keys(agentsData).sort();
         
@@ -203,4 +253,15 @@ function renderTransactionPivotTables(calls) {
                 <td style="padding:10px; border:1px solid #475569; color:${ac<99?'#f87171':'#34d399'}">${ac.toFixed(2)}%</td>
                 <td style="padding:10px; border:1px solid #475569; color:${aeu<90?'#f87171':'#34d399'}">${aeu.toFixed(2)}%</td>
                 <td style="padding:10px; border:1px solid #475569; color:${ab<90?'#f87171':'#34d399'}">${ab.toFixed(2)}%</td>
-                <td style="padding:10px; border:1px solid #475569; color:${as<90?'#f87171':'#34d399'}
+                <td style="padding:10px; border:1px solid #475569; color:${as<90?'#f87171':'#34d399'}">${as.toFixed(2)}%</td>
+            </tr>`;
+        });
+        
+        if (totalCount > 0) {
+            const gComp = totalComp / totalCount, gEU = totalEU / totalCount, gBiz = totalBiz / totalCount, gSoft = totalSoft / totalCount;
+            htmlOutput += `
+                <tr style="background:#1e293b; font-weight:bold; border-top:2px solid #475569;">
+                    <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">Grand Total</td>
+                    <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">${gComp.toFixed(2)}%</td>
+                    <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">${gEU.toFixed(2)}%</td>
+                    <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">${gBiz.toFixed(2)}%</td>

@@ -170,37 +170,32 @@ function renderPivot(calls) {
     let div = window.$('transaction-pivot-container') || document.createElement('div');
     div.id = 'transaction-pivot-container'; div.innerHTML = html;
     const target = window.$('failed-calls-table') || document.querySelector('table') || document.body;
-    if (!window.$('transaction-pivot-container') && target.parentNode) target.parentNode.insertBefore(div, target);
+    if (!window.$('transaction-pivot-container') && target && target.parentNode) target.parentNode.insertBefore(div, target);
 }
 
 async function readExcel(file) {
     if (!file) return [];
     try {
         const ab = await file.arrayBuffer();
-        if (typeof XLSX === 'undefined') { alert("Missing XLSX library script!"); return []; }
+        if (typeof XLSX === 'undefined') { alert("⚠️ مكتبة XLSX غير موجودة في الصفحة!"); return []; }
         const wb = XLSX.read(ab, { type: 'array' });
         return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
-    } catch (e) { alert("Error reading excel: " + e.message); return []; }
+    } catch (e) { alert("❌ خطأ أثناء قراءة الإكسيل: " + e.message); return []; }
 }
 
 async function triggerAnalysis() {
-    const inputs = document.querySelectorAll('input[type="file"]');
-    if (!inputs.length) return;
-    const fDet = window.$('detailed-report')?.files[0] || inputs[1]?.files[0] || inputs[0]?.files[0];
-    const fSum = window.$('summary-report')?.files[0] || (inputs[0]?.files[0] !== fDet ? inputs[0]?.files[0] : null);
-    
-    if (!fDet) { alert("Please select the Detailed report first."); return; }
-    const dData = await readExcel(fDet), sData = await readExcel(fSum);
-    if (dData.length) render(processData(dData, sData), sData);
-}
+    try {
+        const inputs = document.querySelectorAll('input[type="file"]');
+        let fDet = window.$('detailed-report')?.files[0];
+        let fSum = window.$('summary-report')?.files[0];
 
-function bind() {
-    let btn = window.$('analyze-btn') || document.querySelector('.bg-blue-600') || document.querySelector('button');
-    if (btn) {
-        btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); triggerAnalysis(); };
-    }
-}
+        // طريقة مرنة للغاية للالتقاط التلقائي في حال لم تكن الـ IDs متطابقة
+        if (!fDet && inputs.length >= 2) {
+            fSum = inputs[0].files[0];
+            fDet = inputs[1].files[0];
+        } else if (!fDet && inputs.length === 1) {
+            fDet = inputs[0].files[0];
+        }
 
-document.addEventListener('DOMContentLoaded', bind);
-bind();
-setTimeout(bind, 500);
+        if (!fDet) { 
+            alert("⚠️ لم يتم العثور على ملف Detailed report

@@ -1,3 +1,4 @@
+// حماية وتعريف دالة التحديد
 window.$ = id => document.getElementById(id);
 
 const COLUMN_ALIASES = {
@@ -18,12 +19,10 @@ const cleanText = (v, fallback = 'Not specified') => String(v ?? '').trim() || f
 function findColumn(row, key, indexFallback) {
     if (!row) return null;
     const keys = Object.keys(row);
-    // محاولة البحث بالاسم أولاً
     const found = keys.find(header => {
         const normHeader = normalise(header);
         return COLUMN_ALIASES[key].some(alias => normHeader.includes(alias) || alias.includes(normHeader));
     });
-    // لو لم يجد الاسم، ياخذ العمود الاحتياطي بالترتيب الرقمي لحماية التشغيل
     return found || keys[indexFallback] || null;
 }
 
@@ -59,11 +58,15 @@ async function readFile(file) {
     if (!file) return [];
     try {
         const buffer = await file.arrayBuffer();
+        if (typeof XLSX === 'undefined') {
+            alert("مكتبة XLSX غير معرفة في الصفحة! يرجى التأكد من استدعاء سكريبت xlsx.full.min.js في ملف الـ HTML.");
+            return [];
+        }
         const workbook = XLSX.read(buffer, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         return XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
     } catch (e) {
-        console.error("Error reading Excel file:", e);
+        alert("خطأ أثناء قراءة ملف الإكسيل: " + e.message);
         return [];
     }
 }
@@ -191,11 +194,9 @@ function renderTransactionPivotTables(calls) {
                         <th style="padding:10px; border:1px solid #475569;">Average of %Softskills</th>
                     </tr>
                 </thead><tbody>`;
-        let tCount = 0;
         agentNames.forEach(aName => {
             const d = agentsData[aName], avg = arr => arr.length ? (arr.reduce((a,b)=>a+b,0) / arr.length) : 100;
             const ac = avg(d.compliance), aeu = avg(d.endUser), ab = avg(d.business), as = avg(d.soft);
-            tCount++;
             htmlOutput += `
             <tr style="border-bottom:1px solid #334155;">
                 <td style="padding:10px; border:1px solid #475569; font-weight:500;">${html(aName)}</td>
@@ -210,9 +211,13 @@ function renderTransactionPivotTables(calls) {
     
     let container = window.$('transaction-pivot-container') || document.createElement('div');
     container.id = 'transaction-pivot-container'; container.innerHTML = htmlOutput;
-    const target = window.$('failed-calls-table') || document.body;
-    if (!document.getElementById('transaction-pivot-container') && target.parentNode) {
+    
+    // محاولة ذكية لحقن الجدول في أي مكان متاح بالصفحة
+    const target = window.$('failed-calls-table') || document.querySelector('table') || document.body.lastChild;
+    if (!document.getElementById('transaction-pivot-container') && target && target.parentNode) {
         target.parentNode.insertBefore(container, target);
+    } else if (!document.getElementById('transaction-pivot-container')) {
+        document.body.appendChild(container);
     }
 }
 
@@ -221,14 +226,13 @@ function render({ summary, detailed }) {
     const scores = agents.flatMap(a => a.scores);
     const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : (agents.reduce((acc, a) => acc + a.average, 0) / (agents.length || 1));
     
-    // البحث المرن عن الحقول النصية لتحديثها بالبيانات فوراً
     const setTxt = (id, val) => { if(window.$(id)) window.$(id).textContent = val; };
     setTxt('avg-score', fmtScore(avg));
     setTxt('evaluations', summary.length || calls.length || '0');
     setTxt('agents', agents.length || '0');
     setTxt('critical-errors', calls.filter(c => c.failed).length);
     
-    const rEl = window.$('ranking-list') || document.querySelector('.space-y-4');
+    const rEl = window.$('ranking-list') || document.querySelector('.space-y-4') || document.querySelector('main div');
     if (rEl) {
         rEl.innerHTML = agents.map((a, i) => `
             <div style="padding:12px; border-bottom:1px solid #334155; display:flex; justify-content:space-between; align-items:center; background:#1e293b; margin-bottom:8px; border-radius:6px;">
@@ -248,34 +252,60 @@ function render({ summary, detailed }) {
     renderTransactionPivotTables(calls);
 }
 
-function initDashboard() {
+// دالة التنفيذ المطلقة والربط المزدوج لحل مشكلة توقف الأزرار
+async function runAnalysisDirectly() {
     const inputs = document.querySelectorAll('input[type="file"]');
-    const inputSum = window.$('summary-report') || inputs[0];
-    const inputDet = window.$('detailed-report') || inputs[1];
+    if (inputs.length === 0) return;
     
+    let fileDet = null, fileSum = null;
+    
+    // تحديد حقول الملفات بشكل أعمى ومرن
+    if (window.$('detailed-report') && window.$('detailed-report').files[0]) {
+        fileDet = window.$('detailed-report').files[0];
+        fileSum = window.$('summary-report')?.files[0] || null;
+    } else if (inputs[1] && inputs[1].files[0]) {
+        fileDet = inputs[1].files[0];
+        fileSum = inputs[0].files[0] || null;
+    } else if (inputs[0] && inputs[0].files[0]) {
+        fileDet = inputs[0].files[0];
+    }
+
+    if (!fileDet) {
+        alert("يرجى اختيار ملف Detailed report أولاً قبل الضغط.");
+        return;
+    }
+
+    const dData = await readFile(fileDet);
+    const sData = fileSum ? await readFile(fileSum) : [];
+    
+    if (dData.length === 0 && sData.length === 0) {
+        alert("فشلت قراءة البيانات من الملفات، تأكد من أن الملف بصيغة إكسيل صحيحة وتحتوي على بيانات.");
+        return;
+    }
+
+    render({ summary: sData, detailed: dData });
+}
+
+// تسجيل الأحداث فوراً بأكثر من طريقة لضمان الاستجابة المطلقة
+function setupListeners() {
     let btn = window.$('analyze-btn') || document.querySelector('.bg-blue-600') || document.querySelector('button');
     if (!btn) {
-        document.querySelectorAll('button').forEach(b => { if(b.textContent.includes('Analyze')) btn = b; });
+        document.querySelectorAll('button').forEach(b => {
+            if (b.textContent.toLowerCase().includes('analyze')) btn = b;
+        });
     }
 
     if (btn) {
-        btn.onclick = async (e) => {
+        btn.removeAttribute('onclick');
+        btn.addEventListener('click', function(e) {
             e.preventDefault();
-            // استخدام الحقول المتاحة أياً كانت أسمائها
-            const fileDet = inputDet?.files[0] || inputs[0]?.files[0];
-            const fileSum = inputSum?.files[0] || inputs[1]?.files[0];
-            
-            if (!fileDet) { alert('Please upload at least one Excel report.'); return; }
-            
-            const dData = await readFile(fileDet);
-            const sData = fileSum ? await readFile(fileSum) : [];
-            render({ summary: sData, detailed: dData });
-        };
+            e.stopPropagation();
+            runAnalysisDirectly();
+        });
     }
 }
 
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initDashboard);
-} else {
-    initDashboard();
-}
+// تشغيل فوري ومستمر للتأكد من التقاط الأزرار
+setupListeners();
+setTimeout(setupListeners, 1000);
+document.addEventListener('DOMContentLoaded', setupListeners);

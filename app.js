@@ -1,49 +1,55 @@
-// تعريف الدالة على الـ window لتلافي خطأ ReferenceError في الملفات الأخرى
+// تعريف الدالة global لتلافي أي خطأ في الملفات الأخرى
 window.$ = id => document.getElementById(id);
 
 const COLUMN_ALIASES = {
-    agent: ['agent name','agent','full name','user name','agent name (full name)','الوكيل','الموظف','اسم الموظف'],
-    score: ['score','score %','attribute score','qa score','total score','overall score','total compliance','الدرجة','النسبة'],
-    section: ['section','section name','category','attribute category','الفئة','القسم'],
-    attribute: ['attribute name','attribute','البند','المعيار'],
-    severity: ['severity','الخطورة','نوع الخطأ'],
-    reason: ['error reason','reason','error reason name','سبب الخطأ','السبب'],
-    comment: ['error reason comment','comment','reason comment','التعليق','الملاحظات'],
-    monitoringId: ['monitoring id','evaluation id','interaction id','call id','id','رقم المكالمة','المكالمة'],
-    transactionType: ['transaction type','type','direction','call type','نوع المعاملة','الاتجاه']
+    agent: ['agent','name','user','الوكيل','الموظف','اسم'],
+    score: ['score','compliance','الدرجة','النسبة','المعدل'],
+    section: ['section','category','الفئة','القسم','نوع المعيار'],
+    attribute: ['attribute','البند','المعيار','السلوك'],
+    severity: ['severity','خطورة','الخطورة','نوع الخطأ'],
+    reason: ['reason','سبب','السبب'],
+    comment: ['comment','ملاحظات','التعليق','الملاحظة'],
+    monitoringId: ['monitoring','evaluation','interaction','call','id','رقم','المكالمة'],
+    transactionType: ['transaction','type','direction','اتجاه','نوع']
 };
 
 const normalise = v => String(v ?? '').trim().toLowerCase().replace(/[_-]+/g,' ').replace(/\s+/g,' ');
 const cleanText = (v, fallback = 'Not specified') => String(v ?? '').trim() || fallback;
 
 function findColumn(row, key) {
-    return Object.keys(row || {}).find(header => {
+    if (!row) return null;
+    return Object.keys(row).find(header => {
         const normHeader = normalise(header);
         return COLUMN_ALIASES[key].some(alias => normHeader.includes(alias) || alias.includes(normHeader));
     });
 }
+
 function value(row, key) {
     const column = findColumn(row, key);
     return column ? row[column] : '';
 }
+
 function parseScore(v) {
+    if (v === null || v === undefined || v === '') return null;
     const n = parseFloat(String(v).replace('%',''));
     return Number.isFinite(n) ? (n <= 1 ? n * 100 : n) : null;
 }
+
 function fmtScore(n) {
     return n === null || Number.isNaN(n) ? '0.00%' : `${n.toFixed(2)}%`;
 }
+
 function html(v) {
     return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function category(row) {
-    const text = `${value(row,'section')} ${value(row,'severity')}`.toLowerCase();
-    if (text.includes('business') || text.includes('بيزنس')) return 'Business Critical';
-    if (text.includes('end user') || text.includes('end-user') || text.includes('عميل')) return 'End User Critical';
-    if (text.includes('soft') || text.includes('سوفت')) return 'Soft Skills';
-    if (text.includes('compliance') || text.includes('امتثال')) return 'Compliance';
-    return 'Other';
+    const text = `${value(row,'section')} ${value(row,'severity')} ${value(row,'attribute')}`.toLowerCase();
+    if (text.includes('business') || text.includes('بيزنس') || text.includes('عمليات')) return 'Business Critical';
+    if (text.includes('end user') || text.includes('عميل') || text.includes('نهائي')) return 'End User Critical';
+    if (text.includes('soft') || text.includes('سوفت') || text.includes('مهارات')) return 'Soft Skills';
+    if (text.includes('compliance') || text.includes('امتثال') || text.includes('نظامي')) return 'Compliance';
+    return 'Soft Skills'; // Fallback الافتراضي لحماية الحسابات
 }
 
 async function readFile(file) {
@@ -51,9 +57,12 @@ async function readFile(file) {
     try {
         const buffer = await file.arrayBuffer();
         const workbook = XLSX.read(buffer, { type: 'array' });
-        return XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' });
+        const sheetName = workbook.SheetNames[0];
+        const data = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
+        console.log(`[File Loaded] ${file.name}:`, data.slice(0, 2)); // لفحص الأعمدة المقروءة في الكونسول
+        return data;
     } catch (e) {
-        console.error("Error reading file:", e);
+        console.error("Error reading Excel file:", e);
         return [];
     }
 }
@@ -86,7 +95,9 @@ function analyseCalls(failedRows, allSummaryRows = []) {
     
     const callsGrouped = new Map();
     failedRows.forEach(row => {
-        const key = `${cleanText(value(row, 'agent'), 'Unknown agent')}::${cleanText(value(row, 'monitoringId'), 'Unknown ID')}`;
+        const agentName = cleanText(value(row, 'agent'), 'Unknown agent');
+        const callId = cleanText(value(row, 'monitoringId'), 'Unknown ID');
+        const key = `${agentName}::${callId}`;
         if (!callsGrouped.has(key)) callsGrouped.set(key, []);
         callsGrouped.get(key).push(row);
     });
@@ -205,14 +216,19 @@ function renderTransactionPivotTables(calls) {
         }
         htmlOutput += `</tbody></table></div>`;
     });
+    
     let container = window.$('transaction-pivot-container') || document.createElement('div');
     container.id = 'transaction-pivot-container'; container.innerHTML = htmlOutput;
     const target = window.$('failed-calls-table') || document.body;
-    if (!document.getElementById('transaction-pivot-container')) target.parentNode.insertBefore(container, target);
+    if (!document.getElementById('transaction-pivot-container') && target.parentNode) {
+        target.parentNode.insertBefore(container, target);
+    }
 }
 
 function render({ summary, detailed }) {
+    console.log("Rendering started with rows:", { summaryLength: summary.length, detailedLength: detailed.length });
     const calls = analyseCalls(detailed, summary), agents = agentStats(summary, detailed, calls);
+    
     const scores = agents.flatMap(a => a.scores);
     const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : (agents.reduce((acc, a) => acc + a.average, 0) / (agents.length || 1));
     
@@ -241,18 +257,39 @@ function render({ summary, detailed }) {
     renderTransactionPivotTables(calls);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    const btn = window.$('analyze-btn') || document.querySelector('button') || document.querySelector('.bg-blue-600');
-    const inputSum = window.$('summary-report') || document.querySelectorAll('input[type="file"]')[0];
-    const inputDet = window.$('detailed-report') || document.querySelectorAll('input[type="file"]')[1];
+// دالة التشغيل الذكي والربط القوي بالأزرار
+function initDashboard() {
+    const inputs = document.querySelectorAll('input[type="file"]');
+    const inputSum = window.$('summary-report') || inputs[0];
+    const inputDet = window.$('detailed-report') || inputs[1];
+    
+    // البحث عن زر التحليل بأي طريقة ممكنة داخل الـ DOM
+    let btn = window.$('analyze-btn') || document.querySelector('.bg-blue-600') || document.querySelector('button');
+    if (!btn) {
+        const buttons = document.querySelectorAll('button');
+        buttons.forEach(b => { if(b.textContent.includes('Analyze')) btn = b; });
+    }
 
     if (btn) {
-        btn.addEventListener('click', async (e) => {
+        console.log("Analyze Button successfully bound.");
+        btn.onclick = async (e) => {
             e.preventDefault();
-            if (!inputDet?.files[0]) { alert('Please upload the Detailed report first.'); return; }
-            const sData = inputSum?.files[0] ? await readFile(inputSum.files[0]) : [];
+            console.log("Analyze button clicked!");
+            if (!inputDet || !inputDet.files[0]) { 
+                alert('Please upload the Detailed report first.'); 
+                return; 
+            }
+            const sData = (inputSum && inputSum.files[0]) ? await readFile(inputSum.files[0]) : [];
             const dData = await readFile(inputDet.files[0]);
             render({ summary: sData, detailed: dData });
-        });
+        };
+    } else {
+        console.warn("Analyze button not found in DOM yet. Retrying...");
     }
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initDashboard);
+} else {
+    initDashboard();
+}

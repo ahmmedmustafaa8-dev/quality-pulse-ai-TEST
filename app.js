@@ -1,4 +1,3 @@
-// تعريف الدالة global لتلافي أي خطأ في الملفات الأخرى
 window.$ = id => document.getElementById(id);
 
 const COLUMN_ALIASES = {
@@ -16,16 +15,20 @@ const COLUMN_ALIASES = {
 const normalise = v => String(v ?? '').trim().toLowerCase().replace(/[_-]+/g,' ').replace(/\s+/g,' ');
 const cleanText = (v, fallback = 'Not specified') => String(v ?? '').trim() || fallback;
 
-function findColumn(row, key) {
+function findColumn(row, key, indexFallback) {
     if (!row) return null;
-    return Object.keys(row).find(header => {
+    const keys = Object.keys(row);
+    // محاولة البحث بالاسم أولاً
+    const found = keys.find(header => {
         const normHeader = normalise(header);
         return COLUMN_ALIASES[key].some(alias => normHeader.includes(alias) || alias.includes(normHeader));
     });
+    // لو لم يجد الاسم، ياخذ العمود الاحتياطي بالترتيب الرقمي لحماية التشغيل
+    return found || keys[indexFallback] || null;
 }
 
-function value(row, key) {
-    const column = findColumn(row, key);
+function value(row, key, indexFallback = 0) {
+    const column = findColumn(row, key, indexFallback);
     return column ? row[column] : '';
 }
 
@@ -44,12 +47,12 @@ function html(v) {
 }
 
 function category(row) {
-    const text = `${value(row,'section')} ${value(row,'severity')} ${value(row,'attribute')}`.toLowerCase();
+    const text = `${value(row,'section',2)} ${value(row,'severity',4)} ${value(row,'attribute',3)}`.toLowerCase();
     if (text.includes('business') || text.includes('بيزنس') || text.includes('عمليات')) return 'Business Critical';
     if (text.includes('end user') || text.includes('عميل') || text.includes('نهائي')) return 'End User Critical';
     if (text.includes('soft') || text.includes('سوفت') || text.includes('مهارات')) return 'Soft Skills';
     if (text.includes('compliance') || text.includes('امتثال') || text.includes('نظامي')) return 'Compliance';
-    return 'Soft Skills'; // Fallback الافتراضي لحماية الحسابات
+    return 'Soft Skills';
 }
 
 async function readFile(file) {
@@ -58,9 +61,7 @@ async function readFile(file) {
         const buffer = await file.arrayBuffer();
         const workbook = XLSX.read(buffer, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
-        const data = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
-        console.log(`[File Loaded] ${file.name}:`, data.slice(0, 2)); // لفحص الأعمدة المقروءة في الكونسول
-        return data;
+        return XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
     } catch (e) {
         console.error("Error reading Excel file:", e);
         return [];
@@ -70,7 +71,7 @@ async function readFile(file) {
 function getUniqueErrors(rows) {
     const seen = new Set();
     return rows.filter(row => {
-        const key = `${normalise(value(row, 'reason'))}::${normalise(value(row, 'comment'))}`;
+        const key = `${normalise(value(row, 'reason', 5))}::${normalise(value(row, 'comment', 6))}`;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
@@ -89,14 +90,14 @@ function analyseCalls(failedRows, allSummaryRows = []) {
     const map = new Map(), summaryTypeMap = new Map();
     
     allSummaryRows.forEach(row => {
-        const id = cleanText(value(row, 'monitoringId')), tType = cleanText(value(row, 'transactionType'));
+        const id = cleanText(value(row, 'monitoringId', 7)), tType = cleanText(value(row, 'transactionType', 8));
         if (id && tType) summaryTypeMap.set(normalise(id), tType);
     });
     
     const callsGrouped = new Map();
     failedRows.forEach(row => {
-        const agentName = cleanText(value(row, 'agent'), 'Unknown agent');
-        const callId = cleanText(value(row, 'monitoringId'), 'Unknown ID');
+        const agentName = cleanText(value(row, 'agent', 0), 'Unknown agent');
+        const callId = cleanText(value(row, 'monitoringId', 7), 'Unknown ID');
         const key = `${agentName}::${callId}`;
         if (!callsGrouped.has(key)) callsGrouped.set(key, []);
         callsGrouped.get(key).push(row);
@@ -120,7 +121,7 @@ function analyseCalls(failedRows, allSummaryRows = []) {
     });
 
     allSummaryRows.forEach(row => {
-        const agent = cleanText(value(row, 'agent'), 'Unknown agent'), id = cleanText(value(row, 'monitoringId'), ''), tType = cleanText(value(row, 'transactionType'), 'Inbound');
+        const agent = cleanText(value(row, 'agent', 0), 'Unknown agent'), id = cleanText(value(row, 'monitoringId', 7), ''), tType = cleanText(value(row, 'transactionType', 8), 'Inbound');
         if (id && !map.has(`${agent}::${id}`)) {
             map.set(`${agent}::${id}`, { id, agent, type: tType, failed: false, categoryScores: { compliance: 100, endUser: 100, business: 100, soft: 100 } });
         }
@@ -136,8 +137,8 @@ function agentStats(summary, failedRows, calls) {
     };
 
     summary.forEach(row => {
-        const score = parseScore(value(row, 'score'));
-        if (score !== null) add(cleanText(value(row, 'agent'), 'Unknown agent')).scores.push(score);
+        const score = parseScore(value(row, 'score', 1));
+        if (score !== null) add(cleanText(value(row, 'agent', 0), 'Unknown agent')).scores.push(score);
     });
     calls.forEach(c => {
         const a = add(c.agent);
@@ -147,7 +148,7 @@ function agentStats(summary, failedRows, calls) {
         a.bizScores.push(c.categoryScores.business);
         a.euScores.push(c.categoryScores.endUser);
     });
-    failedRows.forEach(row => add(cleanText(value(row, 'agent'), 'Unknown agent')).mistakes++);
+    failedRows.forEach(row => add(cleanText(value(row, 'agent', 0), 'Unknown agent')).mistakes++);
 
     return [...map.values()].map(a => {
         const calcAvg = arr => arr.length ? arr.reduce((x, y) => x + y, 0) / arr.length : 100;
@@ -190,11 +191,11 @@ function renderTransactionPivotTables(calls) {
                         <th style="padding:10px; border:1px solid #475569;">Average of %Softskills</th>
                     </tr>
                 </thead><tbody>`;
-        let tComp = 0, tEU = 0, tBiz = 0, tSoft = 0, tCount = 0;
+        let tCount = 0;
         agentNames.forEach(aName => {
             const d = agentsData[aName], avg = arr => arr.length ? (arr.reduce((a,b)=>a+b,0) / arr.length) : 100;
             const ac = avg(d.compliance), aeu = avg(d.endUser), ab = avg(d.business), as = avg(d.soft);
-            tComp += ac; tEU += aeu; tBiz += ab; tSoft += as; tCount++;
+            tCount++;
             htmlOutput += `
             <tr style="border-bottom:1px solid #334155;">
                 <td style="padding:10px; border:1px solid #475569; font-weight:500;">${html(aName)}</td>
@@ -204,16 +205,6 @@ function renderTransactionPivotTables(calls) {
                 <td style="padding:10px; border:1px solid #475569; color:${as<90?'#f87171':'#34d399'}">${as.toFixed(2)}%</td>
             </tr>`;
         });
-        if (tCount > 0) {
-            htmlOutput += `
-            <tr style="background:#1e293b; font-weight:bold; border-top:2px solid #475569;">
-                <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">Grand Total</td>
-                <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">${(tComp/tCount).toFixed(2)}%</td>
-                <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">${(tEU/tCount).toFixed(2)}%</td>
-                <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">${(tBiz/tCount).toFixed(2)}%</td>
-                <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">${(tSoft/tCount).toFixed(2)}%</td>
-            </tr>`;
-        }
         htmlOutput += `</tbody></table></div>`;
     });
     
@@ -226,21 +217,21 @@ function renderTransactionPivotTables(calls) {
 }
 
 function render({ summary, detailed }) {
-    console.log("Rendering started with rows:", { summaryLength: summary.length, detailedLength: detailed.length });
     const calls = analyseCalls(detailed, summary), agents = agentStats(summary, detailed, calls);
-    
     const scores = agents.flatMap(a => a.scores);
     const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : (agents.reduce((acc, a) => acc + a.average, 0) / (agents.length || 1));
     
-    if (window.$('avg-score')) window.$('avg-score').textContent = fmtScore(avg);
-    if (window.$('evaluations')) window.$('evaluations').textContent = summary.length || calls.length || '0';
-    if (window.$('agents')) window.$('agents').textContent = agents.length || '0';
-    if (window.$('critical-errors')) window.$('critical-errors').textContent = calls.filter(c => c.failed).length;
+    // البحث المرن عن الحقول النصية لتحديثها بالبيانات فوراً
+    const setTxt = (id, val) => { if(window.$(id)) window.$(id).textContent = val; };
+    setTxt('avg-score', fmtScore(avg));
+    setTxt('evaluations', summary.length || calls.length || '0');
+    setTxt('agents', agents.length || '0');
+    setTxt('critical-errors', calls.filter(c => c.failed).length);
     
-    const rEl = window.$('ranking-list');
+    const rEl = window.$('ranking-list') || document.querySelector('.space-y-4');
     if (rEl) {
         rEl.innerHTML = agents.map((a, i) => `
-            <div style="padding:12px; border-bottom:1px solid #334155; display:flex; justify-content:space-between; align-items:center;">
+            <div style="padding:12px; border-bottom:1px solid #334155; display:flex; justify-content:space-between; align-items:center; background:#1e293b; margin-bottom:8px; border-radius:6px;">
                 <span style="color:#94a3b8; font-weight:bold; width:24px;">${i+1}</span>
                 <div style="flex-grow:1; margin-left:10px;">
                     <div style="font-weight:bold; color:#f8fafc;">${a.name}</div>
@@ -257,34 +248,29 @@ function render({ summary, detailed }) {
     renderTransactionPivotTables(calls);
 }
 
-// دالة التشغيل الذكي والربط القوي بالأزرار
 function initDashboard() {
     const inputs = document.querySelectorAll('input[type="file"]');
     const inputSum = window.$('summary-report') || inputs[0];
     const inputDet = window.$('detailed-report') || inputs[1];
     
-    // البحث عن زر التحليل بأي طريقة ممكنة داخل الـ DOM
     let btn = window.$('analyze-btn') || document.querySelector('.bg-blue-600') || document.querySelector('button');
     if (!btn) {
-        const buttons = document.querySelectorAll('button');
-        buttons.forEach(b => { if(b.textContent.includes('Analyze')) btn = b; });
+        document.querySelectorAll('button').forEach(b => { if(b.textContent.includes('Analyze')) btn = b; });
     }
 
     if (btn) {
-        console.log("Analyze Button successfully bound.");
         btn.onclick = async (e) => {
             e.preventDefault();
-            console.log("Analyze button clicked!");
-            if (!inputDet || !inputDet.files[0]) { 
-                alert('Please upload the Detailed report first.'); 
-                return; 
-            }
-            const sData = (inputSum && inputSum.files[0]) ? await readFile(inputSum.files[0]) : [];
-            const dData = await readFile(inputDet.files[0]);
+            // استخدام الحقول المتاحة أياً كانت أسمائها
+            const fileDet = inputDet?.files[0] || inputs[0]?.files[0];
+            const fileSum = inputSum?.files[0] || inputs[1]?.files[0];
+            
+            if (!fileDet) { alert('Please upload at least one Excel report.'); return; }
+            
+            const dData = await readFile(fileDet);
+            const sData = fileSum ? await readFile(fileSum) : [];
             render({ summary: sData, detailed: dData });
         };
-    } else {
-        console.warn("Analyze button not found in DOM yet. Retrying...");
     }
 }
 

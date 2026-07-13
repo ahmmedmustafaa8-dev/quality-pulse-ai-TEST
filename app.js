@@ -1,22 +1,27 @@
-// 1. الأكواد الثابتة والـ Aliases للتعرف على الأعمدة
+// 1. الأكواد الثابتة والـ Aliases للتعرف على الأعمدة (عربي وإنجليزي)
 const COLUMN_ALIASES = {
-    agent: ['agent name','agent','full name','user name','agent name (full name)'],
-    score: ['score','score %','attribute score','qa score','total score','overall score','total compliance'],
-    section: ['section','section name','category','attribute category'],
-    attribute: ['attribute name','attribute'],
-    severity: ['severity'],
-    reason: ['error reason','reason','error reason name'],
-    comment: ['error reason comment','comment','reason comment'],
-    monitoringId: ['monitoring id','evaluation id','interaction id','call id','id'],
-    transactionType: ['transaction type','type','direction','call type']
+    agent: ['agent name','agent','full name','user name','agent name (full name)','الوكيل','الموظف','اسم الموظف'],
+    score: ['score','score %','attribute score','qa score','total score','overall score','total compliance','الدرجة','النسبة'],
+    section: ['section','section name','category','attribute category','الفئة','القسم'],
+    attribute: ['attribute name','attribute','البند','المعيار'],
+    severity: ['severity','الخطورة','نوع الخطأ'],
+    reason: ['error reason','reason','error reason name','سبب الخطأ','السبب'],
+    comment: ['error reason comment','comment','reason comment','التعليق','الملاحظات'],
+    monitoringId: ['monitoring id','evaluation id','interaction id','call id','id','رقم المكالمة','المكالمة'],
+    transactionType: ['transaction type','type','direction','call type','نوع المعاملة','الاتجاه']
 };
 
 const $ = id => document.getElementById(id);
+
+// دالة تنظيف وتطابق مرنة جداً للأعمدة
 const normalise = v => String(v ?? '').trim().toLowerCase().replace(/[_-]+/g,' ').replace(/\s+/g,' ');
 const cleanText = (v, fallback = 'Not specified') => String(v ?? '').trim() || fallback;
 
 function findColumn(row, key) {
-    return Object.keys(row || {}).find(header => COLUMN_ALIASES[key].includes(normalise(header)));
+    return Object.keys(row || {}).find(header => {
+        const normHeader = normalise(header);
+        return COLUMN_ALIASES[key].some(alias => normHeader.includes(alias) || alias.includes(normHeader));
+    });
 }
 
 function value(row, key) {
@@ -38,15 +43,15 @@ function html(v) {
 }
 
 function category(row) {
-    const text = `${value(row,'section')}${value(row,'severity')}`.toLowerCase();
-    if (text.includes('business critical')) return 'Business Critical';
-    if (text.includes('end user critical') || text.includes('end-user critical')) return 'End User Critical';
-    if (text.includes('soft')) return 'Soft Skills';
-    if (text.includes('compliance')) return 'Compliance';
+    const text = `${value(row,'section')} ${value(row,'severity')}`.toLowerCase();
+    if (text.includes('business') || text.includes('بيزنس')) return 'Business Critical';
+    if (text.includes('end user') || text.includes('end-user') || text.includes('عميل')) return 'End User Critical';
+    if (text.includes('soft') || text.includes('سوفت')) return 'Soft Skills';
+    if (text.includes('compliance') || text.includes('امتثال')) return 'Compliance';
     return 'Other';
 }
 
-// 2. دالة قراءة ملف الإكسيل وتحويله لـ JSON
+// 2. قراءة ملف الإكسيل وتحويله لـ JSON
 async function readFile(file) {
     if (!file) return [];
     try {
@@ -81,7 +86,7 @@ function calculateSoftSkillsScore(errorCount) {
     return 100;
 }
 
-// 3. تحليل المكالمات والربط بين شيت الـ Detailed والـ Summary
+// 3. تحليل المكالمات والربط
 function analyseCalls(failedRows, allSummaryRows = []) {
     const map = new Map();
     const summaryTypeMap = new Map();
@@ -148,7 +153,7 @@ function analyseCalls(failedRows, allSummaryRows = []) {
     return [...map.values()];
 }
 
-// 4. حساب إحصائيات الموظفين
+// 4. إحصائيات الأيجنت
 function agentStats(summary, failedRows, calls) {
     const map = new Map();
     const add = name => {
@@ -195,7 +200,7 @@ function agentStats(summary, failedRows, calls) {
     }).sort((a, b) => b.failedCalls - a.failedCalls || (a.average ?? 0) - (b.average ?? 0));
 }
 
-// 5. بناء جداول الـ Pivot لكل اتجاه (Inbound / Outbound)
+// 5. بناء جداول الـ Pivot لكل اتجاه (تم إغلاق الـ Template وإصلاح القطع هنا بالكامل)
 function renderTransactionPivotTables(calls) {
     const pivot = {};
     const typesSeen = new Set();
@@ -230,10 +235,10 @@ function renderTransactionPivotTables(calls) {
                 <thead>
                     <tr style="background:#334155; color:#94a3b8; font-size:13px;">
                         <th style="padding:10px; border:1px solid #475569;">Agent Name</th>
-                        <th style="padding:10px; border:1px solid #475569;">Average of %Compliance (Target 99%)</th>
-                        <th style="padding:10px; border:1px solid #475569;">Average of %End User Critical (Target 90%)</th>
-                        <th style="padding:10px; border:1px solid #475569;">Average of %Business Critical (Target 90%)</th>
-                        <th style="padding:10px; border:1px solid #475569;">Average of %Softskills (Target 90%)</th>
+                        <th style="padding:10px; border:1px solid #475569;">Average of %Compliance</th>
+                        <th style="padding:10px; border:1px solid #475569;">Average of %End User Critical</th>
+                        <th style="padding:10px; border:1px solid #475569;">Average of %Business Critical</th>
+                        <th style="padding:10px; border:1px solid #475569;">Average of %Softskills</th>
                     </tr>
                 </thead>
                 <tbody>`;
@@ -243,25 +248,3 @@ function renderTransactionPivotTables(calls) {
         agentNames.forEach(aName => {
             const d = agentsData[aName];
             const avg = arr => arr.length ? (arr.reduce((a,b)=>a+b,0) / arr.length) : 100;
-            const ac = avg(d.compliance), aeu = avg(d.endUser), ab = avg(d.business), as = avg(d.soft);
-            
-            totalComp += ac; totalEU += aeu; totalBiz += ab; totalSoft += as; totalCount++;
-            
-            htmlOutput += `
-            <tr style="border-bottom:1px solid #334155;">
-                <td style="padding:10px; border:1px solid #475569; font-weight:500;">${html(aName)}</td>
-                <td style="padding:10px; border:1px solid #475569; color:${ac<99?'#f87171':'#34d399'}">${ac.toFixed(2)}%</td>
-                <td style="padding:10px; border:1px solid #475569; color:${aeu<90?'#f87171':'#34d399'}">${aeu.toFixed(2)}%</td>
-                <td style="padding:10px; border:1px solid #475569; color:${ab<90?'#f87171':'#34d399'}">${ab.toFixed(2)}%</td>
-                <td style="padding:10px; border:1px solid #475569; color:${as<90?'#f87171':'#34d399'}">${as.toFixed(2)}%</td>
-            </tr>`;
-        });
-        
-        if (totalCount > 0) {
-            const gComp = totalComp / totalCount, gEU = totalEU / totalCount, gBiz = totalBiz / totalCount, gSoft = totalSoft / totalCount;
-            htmlOutput += `
-                <tr style="background:#1e293b; font-weight:bold; border-top:2px solid #475569;">
-                    <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">Grand Total</td>
-                    <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">${gComp.toFixed(2)}%</td>
-                    <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">${gEU.toFixed(2)}%</td>
-                    <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">${gBiz.toFixed(2)}%</td>

@@ -151,9 +151,7 @@ function analyseCalls(failedRows, allSummaryRows = []) {
     });
 
     return [...map.values()];
-}
-
-// 4. إحصائيات الأيجنت
+}// 4. إحصائيات الأيجنت
 function agentStats(summary, failedRows, calls) {
     const map = new Map();
     const add = name => {
@@ -200,7 +198,7 @@ function agentStats(summary, failedRows, calls) {
     }).sort((a, b) => b.failedCalls - a.failedCalls || (a.average ?? 0) - (b.average ?? 0));
 }
 
-// 5. بناء جداول الـ Pivot لكل اتجاه (تم إغلاق الـ Template وإصلاح القطع هنا بالكامل)
+// 5. بناء جداول الـ Pivot لكل اتجاه بالكامل بدون أي بتر
 function renderTransactionPivotTables(calls) {
     const pivot = {};
     const typesSeen = new Set();
@@ -248,3 +246,100 @@ function renderTransactionPivotTables(calls) {
         agentNames.forEach(aName => {
             const d = agentsData[aName];
             const avg = arr => arr.length ? (arr.reduce((a,b)=>a+b,0) / arr.length) : 100;
+            const ac = avg(d.compliance), aeu = avg(d.endUser), ab = avg(d.business), as = avg(d.soft);
+            
+            totalComp += ac; totalEU += aeu; totalBiz += ab; totalSoft += as; totalCount++;
+            
+            htmlOutput += `
+            <tr style="border-bottom:1px solid #334155;">
+                <td style="padding:10px; border:1px solid #475569; font-weight:500;">${html(aName)}</td>
+                <td style="padding:10px; border:1px solid #475569; color:${ac<99?'#f87171':'#34d399'}">${ac.toFixed(2)}%</td>
+                <td style="padding:10px; border:1px solid #475569; color:${aeu<90?'#f87171':'#34d399'}">${aeu.toFixed(2)}%</td>
+                <td style="padding:10px; border:1px solid #475569; color:${ab<90?'#f87171':'#34d399'}">${ab.toFixed(2)}%</td>
+                <td style="padding:10px; border:1px solid #475569; color:${as<90?'#f87171':'#34d399'}">${as.toFixed(2)}%</td>
+            </tr>`;
+        });
+        
+        if (totalCount > 0) {
+            const gComp = totalComp / totalCount, gEU = totalEU / totalCount, gBiz = totalBiz / totalCount, gSoft = totalSoft / totalCount;
+            htmlOutput += `
+                <tr style="background:#1e293b; font-weight:bold; border-top:2px solid #475569;">
+                    <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">Grand Total</td>
+                    <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">${gComp.toFixed(2)}%</td>
+                    <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">${gEU.toFixed(2)}%</td>
+                    <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">${gBiz.toFixed(2)}%</td>
+                    <td style="padding:10px; border:1px solid #475569; color:#f59e0b;">${gSoft.toFixed(2)}%</td>
+                </tr>`;
+        }
+        htmlOutput += `</tbody></table></div>`;
+    });
+
+    let targetContainer = $('transaction-pivot-container');
+    if(!targetContainer) {
+        targetContainer = document.createElement('div');
+        targetContainer.id = 'transaction-pivot-container';
+        const placementTarget = $('failed-calls-table') || document.body;
+        placementTarget.parentNode.insertBefore(targetContainer, placementTarget);
+    }
+    targetContainer.innerHTML = htmlOutput;
+}
+
+// 6. دالة العرض وحقن الكروت والقوائم
+function render({ summary, detailed }) {
+    const rawFailed = detailed;
+    const calls = analyseCalls(rawFailed, summary);
+    const agents = agentStats(summary, rawFailed, calls);
+    const scores = agents.flatMap(a => a.scores);
+    const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
+    const failedCalls = calls.filter(c => c.failed);
+    
+    if ($('avg-score')) $('avg-score').textContent = fmtScore(avg || (agents.reduce((acc, a) => acc + a.average, 0) / (agents.length || 1)));
+    if ($('evaluations')) $('evaluations').textContent = summary.length || calls.length || '--';
+    if ($('agents')) $('agents').textContent = agents.length || '--';
+    if ($('critical-errors')) $('critical-errors').textContent = failedCalls.length;
+    
+    const rankingEl = $('ranking-list');
+    if (rankingEl) {
+        rankingEl.innerHTML = agents.map((a, i) => `
+            <div class="ranking-row" style="padding: 12px; border-bottom: 1px solid #334155; display:flex; justify-content:space-between; align-items:center;">
+                <span class="rank" style="color:#94a3b8; font-weight:bold; width:24px;">${i+1}</span>
+                <div style="flex-grow: 1; margin-left: 10px;">
+                    <div class="agent-name" style="font-weight:bold; color:#f8fafc;">${a.name}</div>
+                    <div style="font-size:12px; color:#94a3b8; margin-top:4px;">
+                        Soft: <span style="color:${a.avgSoft<90?'#f87171':'#34d399'}">${a.avgSoft.toFixed(2)}%</span> | 
+                        Biz: <span style="color:${a.avgBusiness<90?'#f87171':'#34d399'}">${a.avgBusiness.toFixed(2)}%</span> | 
+                        End User: <span style="color:${a.avgEndUser<90?'#f87171':'#34d399'}">${a.avgEndUser.toFixed(2)}%</span> | 
+                        Compliance: <span style="color:${a.avgCompliance<99?'#f87171':'#34d399'}">${a.avgCompliance.toFixed(2)}%</span>
+                    </div>
+                </div>
+                <span class="score" style="font-weight:bold; color:#60a5fa;">${fmtScore(a.average)}</span>
+            </div>`).join('');
+    }
+    renderTransactionPivotTables(calls);
+}
+
+// 7. التأكد من تحميل الـ DOM بالكامل قبل ربط أزرار الـ Click
+document.addEventListener('DOMContentLoaded', () => {
+    const btnSubmit = $('analyze-btn') || document.querySelector('button') || document.querySelector('.bg-blue-600');
+    const inputSummary = $('summary-report') || document.querySelectorAll('input[type="file"]')[0];
+    const inputDetailed = $('detailed-report') || document.querySelectorAll('input[type="file"]')[1];
+
+    if (btnSubmit) {
+        btnSubmit.addEventListener('click', async (e) => {
+            e.preventDefault();
+            
+            const fileSummary = inputSummary?.files[0];
+            const fileDetailed = inputDetailed?.files[0];
+
+            if (!fileDetailed) {
+                alert('Please upload the Detailed report first.');
+                return;
+            }
+
+            const summaryData = fileSummary ? await readFile(fileSummary) : [];
+            const detailedData = await readFile(fileDetailed);
+
+            render({ summary: summaryData, detailed: detailedData });
+        });
+    }
+});
